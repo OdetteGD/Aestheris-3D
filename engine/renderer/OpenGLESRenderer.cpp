@@ -1,5 +1,4 @@
 #include "OpenGLESRenderer.h"
 namespace aetheris{
-bool OpenGLESRenderer::Initialize(ANativeWindow*){return false;}bool OpenGLESRenderer::BeginFrame(){return false;}void OpenGLESRenderer::EndFrame(){}bool OpenGLESRenderer::RecreateSwapchain(ANativeWindow*){return false;}
-void OpenGLESRenderer::ReleaseSurface() noexcept {}void OpenGLESRenderer::DrawRenderQueue(const RenderQueue&){}void OpenGLESRenderer::Shutdown()noexcept{}uint64_t OpenGLESRenderer::CreateOffscreenRenderTarget(uint32_t,uint32_t){return 0;}bool OpenGLESRenderer::ResizeOffscreenRenderTarget(uint64_t,uint32_t,uint32_t){return false;}uint64_t OpenGLESRenderer::GetOffscreenColorHandle(uint64_t)const noexcept{return 0;}
+bool OpenGLESRenderer::Initialize(ANativeWindow*){return false;}bool OpenGLESRenderer::BeginFrame(){return false;}void OpenGLESRenderer::EndFrame(){}bool OpenGLESRenderer::RecreateSwapchain(ANativeWindow*){return false;}void OpenGLESRenderer::ReleaseSurface()noexcept{}void OpenGLESRenderer::DrawRenderQueue(const RenderQueue&){}void OpenGLESRenderer::Shutdown()noexcept{}uint64_t OpenGLESRenderer::CreateOffscreenRenderTarget(uint32_t,uint32_t){return 0;}bool OpenGLESRenderer::ResizeOffscreenRenderTarget(uint64_t,uint32_t,uint32_t){return false;}uint64_t OpenGLESRenderer::GetOffscreenColorHandle(uint64_t)const noexcept{return 0;}
 }
