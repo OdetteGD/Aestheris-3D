@@ -141,6 +141,23 @@ jobs:
           echo "Android Gradle project detected."
           echo "Native ABIs: armeabi-v7a, arm64-v8a"
 
+      - name: Validate deferred renderer boot contract
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          grep -F "enum class EngineState" engine/core/EngineCore.h
+          grep -F "EngineState::SurfaceReady" engine/core/EngineCore.cpp
+          grep -F "EngineState::AllocatingAssets" engine/core/EngineCore.cpp
+          grep -F "EnsureDeferredResources()" engine/renderer/IAetherisRenderer.h
+          grep -F "AbortDeferredResources()" engine/renderer/IAetherisRenderer.h
+          grep -F "RecordSafeClear()" engine/renderer/VulkanRenderer.cpp
+          grep -F "AetherisEngine_Fatal" android/JniBridge.cpp
+          test -f app/src/main/assets/fallback_shaders/ssao_mobile_es300.glsl
+          test ! -f app/src/main/shaders/ssao_mobile_es300.frag
+
+          grep -F "target_compile_features(aetheris3d PRIVATE cxx_std_20)" CMakeLists.txt
+
       # Build the production release. Retry transient Gradle/SDK cache failures,
       # while still failing deterministically after the final compiler attempt.
       - name: Build Aetheris Engine Editor
