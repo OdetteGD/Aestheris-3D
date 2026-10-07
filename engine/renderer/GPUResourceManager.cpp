@@ -125,9 +125,11 @@ void GPUResourceManager::DestroyBuffer(GpuBuffer& x) noexcept {
 VkDescriptorPool GPUResourceManager::AcquireDescriptorPool() noexcept {
     for (auto& p : descriptorPools_) if (p.pool && p.remainingSets) return p.pool;
     if (descriptorPoolCount_ >= MaxDescriptorPools) return VK_NULL_HANDLE;
-    std::array<VkDescriptorPoolSize, 4> sizes{{
+    std::array<VkDescriptorPoolSize, 6> sizes{{
         {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1024},
+        {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 256},
         {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 2048},
+        {VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 512},
         {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 512},
         {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 512}
     }};
