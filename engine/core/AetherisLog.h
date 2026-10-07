@@ -3,6 +3,8 @@
 // Centralized Android diagnostics for the single native engine boundary.
 
 #include <android/log.h>
+#include <cstdint>
+#include <type_traits>
 
 #ifndef AETHERIS_LOG_TAG
 #define AETHERIS_LOG_TAG "AetherisEngine"
@@ -20,6 +22,16 @@
 #define AETHERIS_VK_LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, AETHERIS_VK_TAG, __VA_ARGS__)
 
 namespace aetheris {
+
+template <typename T>
+inline uint64_t VkHandleValue(T handle) noexcept {
+    if constexpr (std::is_pointer_v<T>) {
+        return reinterpret_cast<uintptr_t>(handle);
+    } else {
+        return static_cast<uint64_t>(handle);
+    }
+}
+
 inline const char* VkResultName(int result) noexcept {
     switch (result) {
         case 0: return "VK_SUCCESS";
