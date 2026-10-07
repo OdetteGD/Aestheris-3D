@@ -1869,25 +1869,83 @@ void VulkanRenderer::DestroySwapchain() noexcept {
     DestroyBloomResources();
 
     for (VkFramebuffer fb : postFramebuffers_)
-        if (fb) vkDestroyFramebuffer(device_, fb, nullptr);
+        if (fb)
+            vkDestroyFramebuffer(
+                device_,
+                fb,
+                nullptr
+            );
 
     for (VkFramebuffer fb : framebuffers_)
-        if (fb) vkDestroyFramebuffer(device_, fb, nullptr);
+        if (fb)
+            vkDestroyFramebuffer(
+                device_,
+                fb,
+                nullptr
+            );
+
+    if (ssaoFramebuffer_)
+        vkDestroyFramebuffer(
+            device_,
+            ssaoFramebuffer_,
+            nullptr
+        );
+
+    if (geometryFramebuffer_)
+        vkDestroyFramebuffer(
+            device_,
+            geometryFramebuffer_,
+            nullptr
+        );
 
     if (postPass_)
-        vkDestroyRenderPass(device_, postPass_, nullptr);
+        vkDestroyRenderPass(
+            device_,
+            postPass_,
+            nullptr
+        );
 
     if (pass_)
-        vkDestroyRenderPass(device_, pass_, nullptr);
+        vkDestroyRenderPass(
+            device_,
+            pass_,
+            nullptr
+        );
+
+    if (ssaoPass_)
+        vkDestroyRenderPass(
+            device_,
+            ssaoPass_,
+            nullptr
+        );
+
+    if (geometryPass_)
+        vkDestroyRenderPass(
+            device_,
+            geometryPass_,
+            nullptr
+        );
 
     if (hdrView_)
-        vkDestroyImageView(device_, hdrView_, nullptr);
+        vkDestroyImageView(
+            device_,
+            hdrView_,
+            nullptr
+        );
 
     if (hdrImage_)
-        vkDestroyImage(device_, hdrImage_, nullptr);
+        vkDestroyImage(
+            device_,
+            hdrImage_,
+            nullptr
+        );
 
     if (hdrMemory_)
-        vkFreeMemory(device_, hdrMemory_, nullptr);
+        vkFreeMemory(
+            device_,
+            hdrMemory_,
+            nullptr
+        );
 
     hdrView_ = VK_NULL_HANDLE;
     hdrImage_ = VK_NULL_HANDLE;
@@ -1896,11 +1954,24 @@ void VulkanRenderer::DestroySwapchain() noexcept {
     DestroyGBufferAttachments();
 
     for (VkImageView view : views_)
-        if (view) vkDestroyImageView(device_, view, nullptr);
+        if (view)
+            vkDestroyImageView(
+                device_,
+                view,
+                nullptr
+            );
 
     if (swapchain_)
-        vkDestroySwapchainKHR(device_, swapchain_, nullptr);
+        vkDestroySwapchainKHR(
+            device_,
+            swapchain_,
+            nullptr
+        );
 
+    geometryFramebuffer_ = VK_NULL_HANDLE;
+    ssaoFramebuffer_ = VK_NULL_HANDLE;
+    geometryPass_ = VK_NULL_HANDLE;
+    ssaoPass_ = VK_NULL_HANDLE;
     postPass_ = VK_NULL_HANDLE;
     pass_ = VK_NULL_HANDLE;
     swapchain_ = VK_NULL_HANDLE;
@@ -1909,7 +1980,6 @@ void VulkanRenderer::DestroySwapchain() noexcept {
     postFramebuffers_.clear();
     views_.clear();
     images_.clear();
-
     image_ = UINT32_MAX;
 }
 
@@ -2020,6 +2090,7 @@ void VulkanRenderer::Shutdown() noexcept {
         DestroyMaterialResources();
         DestroyCSMResources();
         DestroyDefaultIBL();
+        DestroyEnvironment();
 
         if (frameUbo_.buffer)
             resources_.DestroyBuffer(
@@ -2034,6 +2105,7 @@ void VulkanRenderer::Shutdown() noexcept {
             postFrag_,
             shadowVert_,
             shadowFrag_,
+            ssaoFrag_,
             bloomDownFrag_,
             bloomUpFrag_
         };
@@ -2087,7 +2159,8 @@ void VulkanRenderer::Shutdown() noexcept {
             lightingInputLayout_,
             lightingFrameLayout_,
             postSetLayout_,
-            shadowSetLayout_
+            shadowSetLayout_,
+            ssaoSetLayout_
         };
 
         for (VkDescriptorSetLayout layout :
@@ -2106,6 +2179,7 @@ void VulkanRenderer::Shutdown() noexcept {
         lightingFrameLayout_ = VK_NULL_HANDLE;
         postSetLayout_ = VK_NULL_HANDLE;
         shadowSetLayout_ = VK_NULL_HANDLE;
+        ssaoSetLayout_ = VK_NULL_HANDLE;
 
         for (Frame& frame :
              frames_) {
@@ -6214,24 +6288,24 @@ void VulkanRenderer::DestroyPipelines() noexcept {
         postPipeline_,
         bloomUpPipeline_,
         bloomDownPipeline_,
+        ssaoPipeline_,
         lightingPipeline_,
         geometryPipeline_,
         shadowPipeline_
     };
 
-    for (VkPipeline pipeline : pipelines) {
-        if (pipeline) {
+    for (VkPipeline pipeline : pipelines)
+        if (pipeline)
             vkDestroyPipeline(
                 device_,
                 pipeline,
                 nullptr
             );
-        }
-    }
 
     postPipeline_ = VK_NULL_HANDLE;
     bloomUpPipeline_ = VK_NULL_HANDLE;
     bloomDownPipeline_ = VK_NULL_HANDLE;
+    ssaoPipeline_ = VK_NULL_HANDLE;
     lightingPipeline_ = VK_NULL_HANDLE;
     geometryPipeline_ = VK_NULL_HANDLE;
     shadowPipeline_ = VK_NULL_HANDLE;
@@ -6240,13 +6314,12 @@ void VulkanRenderer::DestroyPipelines() noexcept {
 void VulkanRenderer::DestroyDescriptors() noexcept {
     if (!device_) return;
 
-    if (descriptorPool_) {
+    if (descriptorPool_)
         vkDestroyDescriptorPool(
             device_,
             descriptorPool_,
             nullptr
         );
-    }
 
     descriptorPool_ = VK_NULL_HANDLE;
     lightingInputSet_ = VK_NULL_HANDLE;
@@ -6255,11 +6328,10 @@ void VulkanRenderer::DestroyDescriptors() noexcept {
     bloomDownSet_ = VK_NULL_HANDLE;
     bloomUpSet_ = VK_NULL_HANDLE;
     shadowSet_ = VK_NULL_HANDLE;
+    ssaoSet_ = VK_NULL_HANDLE;
 
-    for (VkDescriptorSet& set :
-         materialSets_) {
+    for (VkDescriptorSet& set : materialSets_)
         set = VK_NULL_HANDLE;
-    }
 }
 
 void VulkanRenderer::DestroyDemoMeshes() noexcept {
@@ -7273,6 +7345,70 @@ void VulkanRenderer::DestroyCSMResources() noexcept {
     shadowSampler_ = VK_NULL_HANDLE;
     shadowPass_ = VK_NULL_HANDLE;
 }
+
+void VulkanRenderer::DestroySSAOTarget() noexcept {
+    if (!device_) return;
+
+    if (ssaoView_)
+        vkDestroyImageView(
+            device_,
+            ssaoView_,
+            nullptr
+        );
+
+    if (ssaoImage_)
+        vkDestroyImage(
+            device_,
+            ssaoImage_,
+            nullptr
+        );
+
+    if (ssaoMemory_)
+        vkFreeMemory(
+            device_,
+            ssaoMemory_,
+            nullptr
+        );
+
+    ssaoView_ = VK_NULL_HANDLE;
+    ssaoImage_ = VK_NULL_HANDLE;
+    ssaoMemory_ = VK_NULL_HANDLE;
+    ssaoExtent_ = {};
+}
+
+void VulkanRenderer::DestroyEnvironment() noexcept {
+    if (!device_) return;
+
+    if (environmentView_)
+        vkDestroyImageView(
+            device_,
+            environmentView_,
+            nullptr
+        );
+
+    if (environmentImage_)
+        vkDestroyImage(
+            device_,
+            environmentImage_,
+            nullptr
+        );
+
+    if (environmentMemory_)
+        vkFreeMemory(
+            device_,
+            environmentMemory_,
+            nullptr
+        );
+
+    environmentView_ = VK_NULL_HANDLE;
+    environmentImage_ = VK_NULL_HANDLE;
+    environmentMemory_ = VK_NULL_HANDLE;
+    environmentWidth_ = 0;
+    environmentHeight_ = 0;
+    environmentMipLevels_ = 1;
+    prefilteredMipLevels_ = 1;
+}
+
 
 void VulkanRenderer::DestroyBloomResources() noexcept {
     if (!device_) return;
