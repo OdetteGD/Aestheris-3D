@@ -128,11 +128,16 @@ bool AetherisRenderGraph::BuildBarriers() noexcept {
     for (uint32_t oi = 0; oi < orderCount_; ++oi) {
         const uint32_t pi = order_[oi];
         auto addImageBarrier = [&](ResourceHandle h, VkImageLayout desired, VkPipelineStageFlags dstStage, VkAccessFlags dstAccess) {
-            if (!h.Valid() || !resources_[h.Value()].isImage || state[h.Value()].layout == desired) return;
+            if (!h.Valid() || !resources_[h.Value()].isImage) return;
+            const bool layoutChange = state[h.Value()].layout != desired;
+            const bool accessChange = state[h.Value()].access != dstAccess;
+            if (!layoutChange && !accessChange) return;
             if (barrierCounts_[pi] >= barriers_[pi].size()) return;
             auto& b = barriers_[pi][barrierCounts_[pi]++];
             b.resource = h; b.isImage = true;
             b.image = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+            b.srcStage = state[h.Value()].stages;
+            b.dstStage = dstStage;
             b.image.oldLayout = state[h.Value()].layout;
             b.image.newLayout = desired;
             b.image.srcAccessMask = state[h.Value()].access;
@@ -140,7 +145,7 @@ bool AetherisRenderGraph::BuildBarriers() noexcept {
             b.image.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
             b.image.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
             b.image.image = images_[h.Value()];
-            b.image.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+            b.image.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, resources_[h.Value()].image.mipLevels, 0, resources_[h.Value()].image.arrayLayers};
             state[h.Value()] = {desired, dstStage, dstAccess};
         };
         for (uint32_t r = 0; r < passes_[pi].readCount; ++r)
@@ -169,7 +174,11 @@ void AetherisRenderGraph::Execute(VkCommandBuffer cmd, RenderGraphContext& conte
             std::array<VkImageMemoryBarrier, 64> ib{};
             uint32_t ic = 0;
             for (uint32_t i = 0; i < count; ++i) if (barriers_[pi][i].isImage) ib[ic++] = barriers_[pi][i].image;
-            if (ic) vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 0, nullptr, ic, ib.data());
+            if (ic) VkPipelineStageFlags srcStages = 0, dstStages = 0;
+            for (uint32_t i = 0; i < count; ++i) { srcStages |= barriers_[pi][i].srcStage; dstStages |= barriers_[pi][i].dstStage; }
+            if (!srcStages) srcStages = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+            if (!dstStages) dstStages = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+            vkCmdPipelineBarrier(cmd, srcStages, dstStages, 0, 0, nullptr, 0, nullptr, ic, ib.data());
         }
         if (passes_[pi].execute) passes_[pi].execute(context, cmd, passes_[pi].userData);
     }
