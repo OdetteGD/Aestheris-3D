@@ -4,7 +4,7 @@ import android.view.Surface
 
 object AetherisNative {
     init {
-        System.loadLibrary("aetheris")
+        System.loadLibrary("aetheris3d")
     }
 
     @JvmStatic external fun nativeSetProjectRoot(root: String)
