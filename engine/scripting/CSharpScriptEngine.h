@@ -25,6 +25,8 @@ private:
     using MonoThread = void;
     using MonoImageOpenStatus = int;
 
+    using fn_mono_set_assemblies_path = void (*)(const char*);
+    using fn_mono_set_dirs = void (*)(const char*, const char*);
     using fn_mono_jit_init_version = MonoDomain* (*)(const char*, const char*);
     using fn_mono_jit_cleanup = void (*)(MonoDomain*);
     using fn_mono_thread_attach = MonoThread* (*)(MonoDomain*);
@@ -44,6 +46,8 @@ private:
     MonoMethod* initializeMethod_{};
     MonoMethod* updateMethod_{};
 
+    fn_mono_set_assemblies_path mono_set_assemblies_path_{};
+    fn_mono_set_dirs mono_set_dirs_{};
     fn_mono_jit_init_version mono_jit_init_version_{};
     fn_mono_jit_cleanup mono_jit_cleanup_{};
     fn_mono_thread_attach mono_thread_attach_{};
@@ -99,26 +103,26 @@ extern "C" {
 #endif
 
 AETHERIS_SCRIPT_API uint64_t Aetheris_GetNodeHandle(uint32_t entityIndex) noexcept;
-AETHERIS_SCRIPT_API bool Aetheris_SetNodePosition(
+AETHERIS_SCRIPT_API int32_t Aetheris_SetNodePosition(
     uint64_t nodeHandle,
     float x,
     float y,
     float z
 ) noexcept;
-AETHERIS_SCRIPT_API bool Aetheris_SetNodeRotation(
+AETHERIS_SCRIPT_API int32_t Aetheris_SetNodeRotation(
     uint64_t nodeHandle,
     float x,
     float y,
     float z,
     float w
 ) noexcept;
-AETHERIS_SCRIPT_API bool Aetheris_SetNodeScale(
+AETHERIS_SCRIPT_API int32_t Aetheris_SetNodeScale(
     uint64_t nodeHandle,
     float x,
     float y,
     float z
 ) noexcept;
-AETHERIS_SCRIPT_API bool Aetheris_GetNodePosition(
+AETHERIS_SCRIPT_API int32_t Aetheris_GetNodePosition(
     uint64_t nodeHandle,
     float* x,
     float* y,
