@@ -123,7 +123,7 @@ bool EngineCore::BeginFrame() {
 
 void EngineCore::Draw(const RenderQueue& q) {
     std::scoped_lock l(mutex_);
-    if (activeRenderer_ && frameActive_) activeRenderer_->DrawRenderQueue(q);
+    if (activeRenderer_ && frameActive_) activeRenderer_->DrawRenderQueue(q, std::span<const Transform>(scene_.transforms));
 }
 
 void EngineCore::EndFrame() {
