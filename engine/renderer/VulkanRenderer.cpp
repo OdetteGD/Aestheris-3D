@@ -32,6 +32,7 @@ bool VulkanRenderer::Initialize(ANativeWindow* w) {
                 ? std::filesystem::path("cache/pipelines/aetheris_vk.bin")
                 : projectRoot_ / "cache/pipelines/aetheris_vk.bin") ||
         !CreateSwapchain() ||
+        !CreateGBufferAttachments() ||
         !CreatePass() ||
         !CreateViews() ||
         !CreateFramebuffers() ||
@@ -242,27 +243,41 @@ bool VulkanRenderer::CreateSwapchain() {
     return vkGetSwapchainImagesKHR(device_, swapchain_, &in, images_.data()) == VK_SUCCESS;
 }
 
-bool VulkanRenderer::CreatePass() {
-    VkAttachmentDescription a{};
-    a.format = format_;
-    a.samples = VK_SAMPLE_COUNT_1_BIT;
-    a.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    a.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    a.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    a.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-
-    VkAttachmentReference r{0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
-    VkSubpassDescription s{};
-    s.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-    s.colorAttachmentCount = 1;
-    s.pColorAttachments = &r;
-
-    VkRenderPassCreateInfo c{VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO};
-    c.attachmentCount = 1;
-    c.pAttachments = &a;
-    c.subpassCount = 1;
-    c.pSubpasses = &s;
-    return vkCreateRenderPass(device_, &c, nullptr, &pass_) == VK_SUCCESS;
+uint32_t VulkanRenderer::FindMemoryType(uint32_t typeBits, VkMemoryPropertyFlags properties) const noexcept {
+    VkPhysicalDeviceMemoryProperties memory{};
+    vkGetPhysicalDeviceMemoryProperties(gpu_, &memory);
+    for (uint32_t i=0;i<memory.memoryTypeCount;++i)
+        if((typeBits&(1u<<i))&&(memory.memoryTypes[i].propertyFlags&properties)==properties)return i;
+    return UINT32_MAX;
+}
+bool VulkanRenderer::CreateAttachmentImage(VkFormat format,VkImageUsageFlags usage,VkImage& image,VkDeviceMemory& memory,VkImageView& view,VkImageAspectFlags aspect){
+    VkImageCreateInfo ci{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};ci.imageType=VK_IMAGE_TYPE_2D;ci.format=format;ci.extent={extent_.width,extent_.height,1};ci.mipLevels=1;ci.arrayLayers=1;ci.samples=VK_SAMPLE_COUNT_1_BIT;ci.tiling=VK_IMAGE_TILING_OPTIMAL;ci.usage=usage;ci.initialLayout=VK_IMAGE_LAYOUT_UNDEFINED;
+    if(vkCreateImage(device_,&ci,nullptr,&image)!=VK_SUCCESS)return false;VkMemoryRequirements req{};vkGetImageMemoryRequirements(device_,image,&req);
+    uint32_t mt=FindMemoryType(req.memoryTypeBits,VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT|VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT);if(mt==UINT32_MAX)mt=FindMemoryType(req.memoryTypeBits,VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    if(mt==UINT32_MAX){vkDestroyImage(device_,image,nullptr);image={};return false;}VkMemoryAllocateInfo ai{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};ai.allocationSize=req.size;ai.memoryTypeIndex=mt;
+    if(vkAllocateMemory(device_,&ai,nullptr,&memory)!=VK_SUCCESS){vkDestroyImage(device_,image,nullptr);image={};return false;}if(vkBindImageMemory(device_,image,memory,0)!=VK_SUCCESS){vkFreeMemory(device_,memory,nullptr);vkDestroyImage(device_,image,nullptr);memory={};image={};return false;}
+    VkImageViewCreateInfo vi{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};vi.image=image;vi.viewType=VK_IMAGE_VIEW_TYPE_2D;vi.format=format;vi.subresourceRange={aspect,0,1,0,1};if(vkCreateImageView(device_,&vi,nullptr,&view)!=VK_SUCCESS){vkFreeMemory(device_,memory,nullptr);vkDestroyImage(device_,image,nullptr);memory={};image={};return false;}return true;
+}
+bool VulkanRenderer::CreateGBufferAttachments(){
+    const VkImageUsageFlags u=VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT|VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT|VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT;
+    if(!CreateAttachmentImage(VK_FORMAT_R16G16B16A16_SFLOAT,u,gbufferImages_[0],gbufferMemory_[0],gbufferViews_[0],VK_IMAGE_ASPECT_COLOR_BIT)||
+       !CreateAttachmentImage(VK_FORMAT_A2B10G10R10_UNORM_PACK32,u,gbufferImages_[1],gbufferMemory_[1],gbufferViews_[1],VK_IMAGE_ASPECT_COLOR_BIT)||
+       !CreateAttachmentImage(VK_FORMAT_R8G8B8A8_UNORM,u,gbufferImages_[2],gbufferMemory_[2],gbufferViews_[2],VK_IMAGE_ASPECT_COLOR_BIT)){DestroyGBufferAttachments();return false;}
+    const VkFormat candidates[]={VK_FORMAT_D32_SFLOAT,VK_FORMAT_D24_UNORM_S8_UINT,VK_FORMAT_D16_UNORM};depthFormat_=VK_FORMAT_UNDEFINED;
+    for(VkFormat f:candidates){VkFormatProperties p{};vkGetPhysicalDeviceFormatProperties(gpu_,f,&p);if(p.optimalTilingFeatures&VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT){depthFormat_=f;break;}}
+    if(depthFormat_==VK_FORMAT_UNDEFINED){DestroyGBufferAttachments();return false;}const VkImageUsageFlags du=VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT|VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+    if(!CreateAttachmentImage(depthFormat_,du,depthImage_,depthMemory_,depthView_,VK_IMAGE_ASPECT_DEPTH_BIT)){DestroyGBufferAttachments();return false;}return true;
+}
+void VulkanRenderer::DestroyGBufferAttachments() noexcept{if(!device_)return;for(size_t i=0;i<3;++i){if(gbufferViews_[i])vkDestroyImageView(device_,gbufferViews_[i],nullptr);if(gbufferImages_[i])vkDestroyImage(device_,gbufferImages_[i],nullptr);if(gbufferMemory_[i])vkFreeMemory(device_,gbufferMemory_[i],nullptr);gbufferViews_[i]={};gbufferImages_[i]={};gbufferMemory_[i]={};}if(depthView_)vkDestroyImageView(device_,depthView_,nullptr);if(depthImage_)vkDestroyImage(device_,depthImage_,nullptr);if(depthMemory_)vkFreeMemory(device_,depthMemory_,nullptr);depthView_={};depthImage_={};depthMemory_={};}
+bool VulkanRenderer::CreatePass(){
+    std::array<VkAttachmentDescription,5>a{};const VkFormat gf[3]={VK_FORMAT_R16G16B16A16_SFLOAT,VK_FORMAT_A2B10G10R10_UNORM_PACK32,VK_FORMAT_R8G8B8A8_UNORM};
+    for(uint32_t i=0;i<3;++i){a[i].format=gf[i];a[i].samples=VK_SAMPLE_COUNT_1_BIT;a[i].loadOp=VK_ATTACHMENT_LOAD_OP_CLEAR;a[i].storeOp=VK_ATTACHMENT_STORE_OP_DONT_CARE;a[i].stencilLoadOp=VK_ATTACHMENT_LOAD_OP_DONT_CARE;a[i].stencilStoreOp=VK_ATTACHMENT_STORE_OP_DONT_CARE;a[i].initialLayout=VK_IMAGE_LAYOUT_UNDEFINED;a[i].finalLayout=VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;}
+    a[3].format=depthFormat_;a[3].samples=VK_SAMPLE_COUNT_1_BIT;a[3].loadOp=VK_ATTACHMENT_LOAD_OP_CLEAR;a[3].storeOp=VK_ATTACHMENT_STORE_OP_DONT_CARE;a[3].stencilLoadOp=VK_ATTACHMENT_LOAD_OP_DONT_CARE;a[3].stencilStoreOp=VK_ATTACHMENT_STORE_OP_DONT_CARE;a[3].initialLayout=VK_IMAGE_LAYOUT_UNDEFINED;a[3].finalLayout=VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+    a[4].format=format_;a[4].samples=VK_SAMPLE_COUNT_1_BIT;a[4].loadOp=VK_ATTACHMENT_LOAD_OP_CLEAR;a[4].storeOp=VK_ATTACHMENT_STORE_OP_STORE;a[4].stencilLoadOp=VK_ATTACHMENT_LOAD_OP_DONT_CARE;a[4].stencilStoreOp=VK_ATTACHMENT_STORE_OP_DONT_CARE;a[4].initialLayout=VK_IMAGE_LAYOUT_UNDEFINED;a[4].finalLayout=VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    const std::array<VkAttachmentReference,3>colors={{{0,VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL},{1,VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL},{2,VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL}}};const VkAttachmentReference depth{3,VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL};const std::array<VkAttachmentReference,3>inputs={{{0,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},{1,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},{2,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL}}};const VkAttachmentReference output{4,VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
+    VkSubpassDescription geometry{};geometry.pipelineBindPoint=VK_PIPELINE_BIND_POINT_GRAPHICS;geometry.colorAttachmentCount=3;geometry.pColorAttachments=colors.data();geometry.pDepthStencilAttachment=&depth;VkSubpassDescription lighting{};lighting.pipelineBindPoint=VK_PIPELINE_BIND_POINT_GRAPHICS;lighting.inputAttachmentCount=3;lighting.pInputAttachments=inputs.data();lighting.colorAttachmentCount=1;lighting.pColorAttachments=&output;
+    std::array<VkSubpassDependency,3>deps{};deps[0]={VK_SUBPASS_EXTERNAL,0,VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT|VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT,VK_ACCESS_MEMORY_READ_BIT,VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT|VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,VK_DEPENDENCY_BY_REGION_BIT};deps[1]={0,1,VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,VK_ACCESS_INPUT_ATTACHMENT_READ_BIT,VK_DEPENDENCY_BY_REGION_BIT};deps[2]={1,VK_SUBPASS_EXTERNAL,VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,VK_ACCESS_MEMORY_READ_BIT,VK_DEPENDENCY_BY_REGION_BIT};
+    const std::array<VkSubpassDescription,2>subs={geometry,lighting};VkRenderPassCreateInfo c{VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO};c.attachmentCount=5;c.pAttachments=a.data();c.subpassCount=2;c.pSubpasses=subs.data();c.dependencyCount=3;c.pDependencies=deps.data();return vkCreateRenderPass(device_,&c,nullptr,&pass_)==VK_SUCCESS;
 }
 
 bool VulkanRenderer::CreateViews() {
@@ -282,17 +297,7 @@ bool VulkanRenderer::CreateViews() {
 
 bool VulkanRenderer::CreateFramebuffers() {
     fb_.resize(views_.size());
-    for (size_t i = 0; i < views_.size(); ++i) {
-        VkFramebufferCreateInfo c{VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
-        c.renderPass = pass_;
-        c.attachmentCount = 1;
-        c.pAttachments = &views_[i];
-        c.width = extent_.width;
-        c.height = extent_.height;
-        c.layers = 1;
-        if (vkCreateFramebuffer(device_, &c, nullptr, &fb_[i]) != VK_SUCCESS) return false;
-    }
-    return true;
+    for(size_t i=0;i<views_.size();++i){const std::array<VkImageView,5>attachments={gbufferViews_[0],gbufferViews_[1],gbufferViews_[2],depthView_,views_[i]};VkFramebufferCreateInfo c{VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};c.renderPass=pass_;c.attachmentCount=5;c.pAttachments=attachments.data();c.width=extent_.width;c.height=extent_.height;c.layers=1;if(vkCreateFramebuffer(device_,&c,nullptr,&fb_[i])!=VK_SUCCESS)return false;}return true;
 }
 
 bool VulkanRenderer::CreateFrames() {
@@ -321,24 +326,13 @@ bool VulkanRenderer::CreateFrames() {
     return true;
 }
 
-bool VulkanRenderer::Record(VkCommandBuffer cmd, uint32_t i) {
-    VkCommandBufferBeginInfo b{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
-    if (vkBeginCommandBuffer(cmd, &b) != VK_SUCCESS) return false;
-
-    VkClearValue cv{};
-    cv.color = {{.02f, .03f, .05f, 1.0f}};
-
-    VkRenderPassBeginInfo r{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
-    r.renderPass = pass_;
-    r.framebuffer = fb_[i];
-    r.renderArea.extent = extent_;
-    r.clearValueCount = 1;
-    r.pClearValues = &cv;
-
-    vkCmdBeginRenderPass(cmd, &r, VK_SUBPASS_CONTENTS_INLINE);
-    vkCmdEndRenderPass(cmd);
-
-    return vkEndCommandBuffer(cmd) == VK_SUCCESS;
+bool VulkanRenderer::Record(VkCommandBuffer cmd,uint32_t i){
+    VkCommandBufferBeginInfo b{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};if(vkBeginCommandBuffer(cmd,&b)!=VK_SUCCESS)return false;
+    std::array<VkClearValue,5>clears{};clears[0].color={{0,0,0,1}};clears[1].color={{0.5f,0.5f,1,1}};clears[2].color={{0,0,0,1}};clears[3].depthStencil={1.0f,0};clears[4].color={{0.02f,0.03f,0.05f,1}};
+    VkRenderPassBeginInfo r{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};r.renderPass=pass_;r.framebuffer=fb_[i];r.renderArea.extent=extent_;r.clearValueCount=5;r.pClearValues=clears.data();
+    vkCmdBeginRenderPass(cmd,&r,VK_SUBPASS_CONTENTS_INLINE);
+    vkCmdNextSubpass(cmd,VK_SUBPASS_CONTENTS_INLINE);
+    vkCmdEndRenderPass(cmd);return vkEndCommandBuffer(cmd)==VK_SUCCESS;
 }
 
 bool VulkanRenderer::BeginFrame() {
@@ -417,6 +411,7 @@ void VulkanRenderer::DestroySwapchain() noexcept {
     images_.clear();
     pass_ = {};
     swapchain_ = {};
+    DestroyGBufferAttachments();
 }
 
 bool VulkanRenderer::RecreateSwapchain(ANativeWindow* w) {
