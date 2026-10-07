@@ -130,42 +130,31 @@ jobs:
             local package_spec="Microsoft.NETCore.App.Runtime.Mono.${rid}"
             local temp_dir
             temp_dir="$(mktemp -d)"
+            local package_dir="${temp_dir}/${package_id}"
+            local package_file="${temp_dir}/${package_id}-${DOTNET_MONO_RUNTIME_VERSION}.nupkg"
 
-            cat > "${temp_dir}/RuntimePackProbe.csproj" <<EOF
-          <Project Sdk="Microsoft.NET.Sdk">
-            <PropertyGroup>
-              <TargetFramework>net10.0</TargetFramework>
-            </PropertyGroup>
-            <ItemGroup>
-              <PackageReference Include="${package_spec}" Version="${DOTNET_MONO_RUNTIME_VERSION}" />
-            </ItemGroup>
-          </Project>
-          EOF
+            mkdir -p "${package_dir}"
+            curl --fail --location --silent --show-error --retry 5 --retry-delay 2 \
+              "https://api.nuget.org/v3-flatcontainer/${package_id}/${DOTNET_MONO_RUNTIME_VERSION}/${package_id}-${DOTNET_MONO_RUNTIME_VERSION}.nupkg" \
+              --output "${package_file}"
+            test -s "${package_file}"
 
-            local package_cache="${temp_dir}/packages"
-            mkdir -p "${package_cache}"
-
-            dotnet restore "${temp_dir}/RuntimePackProbe.csproj" \
-              --packages "${package_cache}" \
-              --nologo
-
-            local package_root="${package_cache}/${package_id}/${DOTNET_MONO_RUNTIME_VERSION}"
-            test -d "${package_root}"
-            test -d "${package_root}/runtimes/${rid}/native"
+            unzip -q -o "${package_file}" -d "${package_dir}"
+            local native_root="${package_dir}/runtimes/${rid}/native"
+            test -d "${native_root}"
 
             mapfile -t native_libs < <(
-              find "${package_root}/runtimes/${rid}/native" \
-                -maxdepth 1 -type f -name "*.so" -print | sort
+              find "${native_root}" -maxdepth 1 -type f -name "*.so" -print | sort
             )
 
             test "${#native_libs[@]}" -gt 0
-
             for native_lib in "${native_libs[@]}"; do
               cp "${native_lib}" "app/src/main/jniLibs/${abi_dir}/"
             done
 
             test -s "app/src/main/jniLibs/${abi_dir}/libmonosgen-2.0.so"
             echo "Staged Mono runtime ${package_spec} ${DOTNET_MONO_RUNTIME_VERSION} -> ${abi_dir}"
+            rm -rf "${temp_dir}"
           }
           stage_mono_runtime "android-arm64" "arm64-v8a"
           stage_mono_runtime "android-arm" "armeabi-v7a"
