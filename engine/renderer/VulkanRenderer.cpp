@@ -1467,77 +1467,147 @@ void VulkanRenderer::Shutdown() noexcept {
 
         resources_.SavePipelineCache(
             projectRoot_.empty()
-                ? std::filesystem::path("cache/pipelines/aetheris_vk.bin")
-                : projectRoot_ / "cache/pipelines/aetheris_vk.bin"
+                ? std::filesystem::path(
+                    "cache/pipelines/aetheris_vk.bin"
+                )
+                : projectRoot_ /
+                    "cache/pipelines/aetheris_vk.bin"
         );
 
         DestroySwapchain();
         DestroyDemoMeshes();
+        DestroyMaterialResources();
+        DestroyCSMResources();
+        DestroyDefaultIBL();
 
         if (frameUbo_.buffer)
-            resources_.DestroyBuffer(frameUbo_);
+            resources_.DestroyBuffer(
+                frameUbo_
+            );
 
-        if (geometryVert_)
-            vkDestroyShaderModule(device_, geometryVert_, nullptr);
-        if (geometryFrag_)
-            vkDestroyShaderModule(device_, geometryFrag_, nullptr);
-        if (fullscreenVert_)
-            vkDestroyShaderModule(device_, fullscreenVert_, nullptr);
-        if (lightingFrag_)
-            vkDestroyShaderModule(device_, lightingFrag_, nullptr);
-        if (postFrag_)
-            vkDestroyShaderModule(device_, postFrag_, nullptr);
+        const VkShaderModule shaders[] = {
+            geometryVert_,
+            geometryFrag_,
+            fullscreenVert_,
+            lightingFrag_,
+            postFrag_,
+            shadowVert_,
+            shadowFrag_,
+            bloomDownFrag_,
+            bloomUpFrag_
+        };
+
+        for (VkShaderModule shader :
+             shaders) {
+            if (shader) {
+                vkDestroyShaderModule(
+                    device_,
+                    shader,
+                    nullptr
+                );
+            }
+        }
 
         geometryVert_ = VK_NULL_HANDLE;
         geometryFrag_ = VK_NULL_HANDLE;
         fullscreenVert_ = VK_NULL_HANDLE;
         lightingFrag_ = VK_NULL_HANDLE;
         postFrag_ = VK_NULL_HANDLE;
+        shadowVert_ = VK_NULL_HANDLE;
+        shadowFrag_ = VK_NULL_HANDLE;
+        bloomDownFrag_ = VK_NULL_HANDLE;
+        bloomUpFrag_ = VK_NULL_HANDLE;
 
-        if (postLayout_)
-            vkDestroyPipelineLayout(device_, postLayout_, nullptr);
-        if (lightingLayout_)
-            vkDestroyPipelineLayout(device_, lightingLayout_, nullptr);
-        if (geometryLayout_)
-            vkDestroyPipelineLayout(device_, geometryLayout_, nullptr);
+        const VkPipelineLayout layouts[] = {
+            geometryLayout_,
+            lightingLayout_,
+            postLayout_,
+            shadowLayout_
+        };
 
-        postLayout_ = VK_NULL_HANDLE;
-        lightingLayout_ = VK_NULL_HANDLE;
+        for (VkPipelineLayout layout :
+             layouts) {
+            if (layout) {
+                vkDestroyPipelineLayout(
+                    device_,
+                    layout,
+                    nullptr
+                );
+            }
+        }
+
         geometryLayout_ = VK_NULL_HANDLE;
+        lightingLayout_ = VK_NULL_HANDLE;
+        postLayout_ = VK_NULL_HANDLE;
+        shadowLayout_ = VK_NULL_HANDLE;
 
-        if (postSetLayout_)
-            vkDestroyDescriptorSetLayout(device_, postSetLayout_, nullptr);
-        if (lightingFrameLayout_)
-            vkDestroyDescriptorSetLayout(device_, lightingFrameLayout_, nullptr);
-        if (lightingInputLayout_)
-            vkDestroyDescriptorSetLayout(device_, lightingInputLayout_, nullptr);
+        const VkDescriptorSetLayout setLayouts[] = {
+            materialSetLayout_,
+            lightingInputLayout_,
+            lightingFrameLayout_,
+            postSetLayout_,
+            shadowSetLayout_
+        };
 
-        postSetLayout_ = VK_NULL_HANDLE;
-        lightingFrameLayout_ = VK_NULL_HANDLE;
+        for (VkDescriptorSetLayout layout :
+             setLayouts) {
+            if (layout) {
+                vkDestroyDescriptorSetLayout(
+                    device_,
+                    layout,
+                    nullptr
+                );
+            }
+        }
+
+        materialSetLayout_ = VK_NULL_HANDLE;
         lightingInputLayout_ = VK_NULL_HANDLE;
+        lightingFrameLayout_ = VK_NULL_HANDLE;
+        postSetLayout_ = VK_NULL_HANDLE;
+        shadowSetLayout_ = VK_NULL_HANDLE;
 
-        DestroyDefaultIBL();
-
-        for (Frame& frame : frames_) {
+        for (Frame& frame :
+             frames_) {
             if (frame.fence)
-                vkDestroyFence(device_, frame.fence, nullptr);
+                vkDestroyFence(
+                    device_,
+                    frame.fence,
+                    nullptr
+                );
 
             if (frame.renderFinished)
-                vkDestroySemaphore(device_, frame.renderFinished, nullptr);
+                vkDestroySemaphore(
+                    device_,
+                    frame.renderFinished,
+                    nullptr
+                );
 
             if (frame.imageAvailable)
-                vkDestroySemaphore(device_, frame.imageAvailable, nullptr);
+                vkDestroySemaphore(
+                    device_,
+                    frame.imageAvailable,
+                    nullptr
+                );
 
             if (frame.pool)
-                vkDestroyCommandPool(device_, frame.pool, nullptr);
+                vkDestroyCommandPool(
+                    device_,
+                    frame.pool,
+                    nullptr
+                );
 
             frame = {};
         }
 
         resources_.Shutdown();
 
-        vkDestroyDevice(device_, nullptr);
-        device_ = VK_NULL_HANDLE;
+        vkDestroyDevice(
+            device_,
+            nullptr
+        );
+
+        device_ =
+            VK_NULL_HANDLE;
     }
 
     if (surface_) {
@@ -1546,7 +1616,9 @@ void VulkanRenderer::Shutdown() noexcept {
             surface_,
             nullptr
         );
-        surface_ = VK_NULL_HANDLE;
+
+        surface_ =
+            VK_NULL_HANDLE;
     }
 
     if (instance_) {
@@ -1554,12 +1626,18 @@ void VulkanRenderer::Shutdown() noexcept {
             instance_,
             nullptr
         );
-        instance_ = VK_NULL_HANDLE;
+
+        instance_ =
+            VK_NULL_HANDLE;
     }
 
     if (window_) {
-        ANativeWindow_release(window_);
-        window_ = nullptr;
+        ANativeWindow_release(
+            window_
+        );
+
+        window_ =
+            nullptr;
     }
 
     gpu_ = VK_NULL_HANDLE;
