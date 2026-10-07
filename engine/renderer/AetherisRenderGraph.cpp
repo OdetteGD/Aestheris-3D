@@ -1,5 +1,6 @@
 #include "engine/renderer/AetherisRenderGraph.h"
 #include <algorithm>
+#include "engine/core/AetherisLog.h"
 
 namespace aetheris {
 
@@ -56,6 +57,11 @@ void AetherisRenderGraph::ImportBuffer(ResourceHandle h, VkBuffer buffer) noexce
     if (!h.Valid() || h.Value() >= resourceCount_) return;
     buffers_[h.Value()] = buffer;
     resources_[h.Value()].imported = true;
+}
+
+void AetherisRenderGraph::MarkExported(ResourceHandle h) noexcept {
+    if (!h.Valid() || h.Value() >= resourceCount_) return;
+    resources_[h.Value()].exported = true;
 }
 AetherisRenderGraph::Builder AetherisRenderGraph::AddPass(const char* name, RenderPassType type,
     RenderGraphPass::ExecuteFn fn, void* user) noexcept {
@@ -129,24 +135,49 @@ bool AetherisRenderGraph::BuildBarriers() noexcept {
         const uint32_t pi = order_[oi];
         auto addImageBarrier = [&](ResourceHandle h, VkImageLayout desired, VkPipelineStageFlags dstStage, VkAccessFlags dstAccess) {
             if (!h.Valid() || !resources_[h.Value()].isImage) return;
+            const bool isPresent = desired == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+            const VkPipelineStageFlags effectiveDstStage =
+                isPresent ? VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT : dstStage;
+            const VkAccessFlags effectiveDstAccess =
+                isPresent ? VK_ACCESS_MEMORY_READ_BIT : dstAccess;
             const bool layoutChange = state[h.Value()].layout != desired;
-            const bool accessChange = state[h.Value()].access != dstAccess;
+            const bool accessChange = state[h.Value()].access != effectiveDstAccess;
             if (!layoutChange && !accessChange) return;
             if (barrierCounts_[pi] >= barriers_[pi].size()) return;
+
+            VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT;
+            const VkImageUsageFlags usage = resources_[h.Value()].image.usage;
+            if (usage & VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT) {
+                const VkFormat format = resources_[h.Value()].image.format;
+                const bool hasStencil =
+                    format == VK_FORMAT_D24_UNORM_S8_UINT ||
+                    format == VK_FORMAT_D32_SFLOAT_S8_UINT ||
+                    format == VK_FORMAT_D16_UNORM_S8_UINT;
+                aspect = VK_IMAGE_ASPECT_DEPTH_BIT |
+                         (hasStencil ? VK_IMAGE_ASPECT_STENCIL_BIT : 0);
+            }
+
             auto& b = barriers_[pi][barrierCounts_[pi]++];
-            b.resource = h; b.isImage = true;
+            b.resource = h;
+            b.isImage = true;
             b.image = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
             b.srcStage = state[h.Value()].stages;
-            b.dstStage = dstStage;
+            b.dstStage = effectiveDstStage;
             b.image.oldLayout = state[h.Value()].layout;
             b.image.newLayout = desired;
             b.image.srcAccessMask = state[h.Value()].access;
-            b.image.dstAccessMask = dstAccess;
+            b.image.dstAccessMask = effectiveDstAccess;
             b.image.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
             b.image.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
             b.image.image = images_[h.Value()];
-            b.image.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, resources_[h.Value()].image.mipLevels, 0, resources_[h.Value()].image.arrayLayers};
-            state[h.Value()] = {desired, dstStage, dstAccess};
+            b.image.subresourceRange = {
+                aspect,
+                0,
+                resources_[h.Value()].image.mipLevels,
+                0,
+                resources_[h.Value()].image.arrayLayers
+            };
+            state[h.Value()] = {desired, effectiveDstStage, effectiveDstAccess};
         };
         for (uint32_t r = 0; r < passes_[pi].readCount; ++r)
             addImageBarrier(passes_[pi].reads[r], passes_[pi].readLayouts[r],
@@ -162,11 +193,14 @@ bool AetherisRenderGraph::BuildBarriers() noexcept {
 
 bool AetherisRenderGraph::Compile() noexcept {
     compiled_ = BuildDependencies() && CullDeadPasses() && TopologicalSort() && BuildBarriers();
+    AETHERIS_LOGD("RenderGraph compile: resources=%u passes=%u live=%u compiled=%d",
+                  resourceCount_, passCount_, orderCount_, compiled_ ? 1 : 0);
     return compiled_;
 }
 
 void AetherisRenderGraph::Execute(VkCommandBuffer cmd, RenderGraphContext& context) noexcept {
     if (!compiled_) return;
+    AETHERIS_LOGD("RenderGraph execute: passes=%u", orderCount_);
     for (uint32_t oi = 0; oi < orderCount_; ++oi) {
         const uint32_t pi = order_[oi];
         const uint32_t count = barrierCounts_[pi];
