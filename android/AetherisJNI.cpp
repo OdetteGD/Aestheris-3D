@@ -4,6 +4,13 @@
 
 using namespace aetheris;
 
+extern "C" JNIEXPORT void JNICALL
+Java_com_aetheris_engine_AetherisNative_nativeSetProjectRoot(JNIEnv* env, jclass, jstring root) {
+    if (!root) return;
+    const char* chars = env->GetStringUTFChars(root, nullptr);
+    if (chars) { EngineCore::Instance().SetProjectRoot(chars); env->ReleaseStringUTFChars(root, chars); }
+}
+
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_aetheris_engine_AetherisNative_nativeInitialize(JNIEnv* env, jclass, jobject surface, jint api) {
     ANativeWindow* window = ANativeWindow_fromSurface(env, surface);
