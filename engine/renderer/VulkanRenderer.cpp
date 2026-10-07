@@ -2227,24 +2227,39 @@ void VulkanRenderer::DestroySwapchain() noexcept {
 }
 
 bool VulkanRenderer::RecreateSwapchain(ANativeWindow* w) {
-    if (!device_ || !w) return false;
+    if (!device_)
+        return false;
+
+    ANativeWindow* targetWindow =
+        w ? w : window_;
+
+    if (!targetWindow)
+        return false;
 
     vkDeviceWaitIdle(device_);
     DestroySwapchain();
 
-    if (w != window_) {
+    if (targetWindow != window_) {
         if (surface_) {
-            vkDestroySurfaceKHR(instance_, surface_, nullptr);
+            vkDestroySurfaceKHR(
+                instance_,
+                surface_,
+                nullptr
+            );
             surface_ = VK_NULL_HANDLE;
         }
 
         if (window_) {
-            ANativeWindow_release(window_);
+            ANativeWindow_release(
+                window_
+            );
             window_ = nullptr;
         }
 
-        window_ = w;
-        ANativeWindow_acquire(window_);
+        window_ = targetWindow;
+        ANativeWindow_acquire(
+            window_
+        );
 
         if (!CreateSurface())
             return false;
@@ -2253,12 +2268,20 @@ bool VulkanRenderer::RecreateSwapchain(ANativeWindow* w) {
             return false;
     }
 
+    if (!surface_)
+        return false;
+
     VkBool32 supported = VK_FALSE;
+
     if (vkGetPhysicalDeviceSurfaceSupportKHR(
-            gpu_, family_, surface_, &supported
-        ) != VK_SUCCESS || supported != VK_TRUE) {
+            gpu_,
+            family_,
+            surface_,
+            &supported
+        ) != VK_SUCCESS ||
+        supported != VK_TRUE) {
         AETHERIS_VK_LOGE(
-            "Vulkan queue family cannot present the new Android surface"
+            "Vulkan queue family cannot present the Android surface"
         );
         return false;
     }
