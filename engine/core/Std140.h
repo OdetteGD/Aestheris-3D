@@ -38,9 +38,9 @@ static_assert(std::is_trivially_copyable_v<MaterialBlock>);
 static_assert(alignof(Vec4) == 16 && sizeof(Vec4) == 16);
 static_assert(alignof(Mat4) == 16 && sizeof(Mat4) == 64);
 static_assert(sizeof(DeferredFrameBlock) == 384);
-static_assert(offsetof(DeferredFrameBlock, invViewProj) == 96);
-static_assert(offsetof(DeferredFrameBlock, csmMatrices) == 160);
-static_assert(offsetof(DeferredFrameBlock, csmSplits) == 352);
+static_assert(offsetof(DeferredFrameBlock, invViewProj) == 112);
+static_assert(offsetof(DeferredFrameBlock, csmMatrices) == 176);
+static_assert(offsetof(DeferredFrameBlock, csmSplits) == 368);
 static_assert(sizeof(CsmBlock) == 208);
 static_assert(sizeof(MaterialBlock) == 32);
 
