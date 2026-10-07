@@ -354,3 +354,5 @@ SceneSnapshot EngineCore::SnapshotScene() const {
     std::scoped_lock lock(mutex_);
     return scene_;
 }
+
+} // namespace aetheris
