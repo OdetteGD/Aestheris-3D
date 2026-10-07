@@ -464,7 +464,7 @@ bool VulkanRenderer::RecreateSwapchain(ANativeWindow* w) {
     vkDeviceWaitIdle(device_);
     DestroySwapchain();
 
-    if (w && w != window_) {
+    if (w && (w != window_ || !surface_)) {
         if (surface_) {
             vkDestroySurfaceKHR(instance_, surface_, nullptr);
             surface_ = {};
