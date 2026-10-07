@@ -1,5 +1,6 @@
 #include "DemoWorldInitializer.h"
 #include "engine/core/AetherisLog.h"
+#include "engine/project/VirtualFileSystem.h"
 
 #include <algorithm>
 #include <cmath>
