@@ -24,6 +24,8 @@ public:
     ~OpenGLESRenderer() override { Shutdown(); }
 
     bool Initialize(ANativeWindow*) override;
+    bool EnsureDeferredResources() override { return true; }
+    bool IsReady() const noexcept override { return initialized_ && surface_ != EGL_NO_SURFACE; }
     bool BeginFrame() override;
     void EndFrame() override;
     bool RecreateSwapchain(ANativeWindow*) override;
