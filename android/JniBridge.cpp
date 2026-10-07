@@ -5,30 +5,6 @@
 
 using namespace aetheris;
 
-namespace {
-RenderAPI SelectApi(jint api) noexcept {
-    return api == 1 ? RenderAPI::OPENGL_ES3 : RenderAPI::VULKAN;
-}
-
-bool WithNativeWindow(JNIEnv* env, jobject surface, const char* event,
-                      bool (EngineCore::*callback)(ANativeWindow*)) {
-    if (!surface) {
-        AETHERIS_LOGW("%s ignored: Java Surface is null", event);
-        return false;
-    }
-
-    ANativeWindow* window = ANativeWindow_fromSurface(env, surface);
-    if (!window) {
-        AETHERIS_LOGE("%s failed: ANativeWindow_fromSurface returned null", event);
-        return false;
-    }
-
-    AETHERIS_LOGD("%s: ANativeWindow=%p acquired for callback", event, static_cast<void*>(window));
-    const bool ok = (EngineCore::Instance().*callback)(window);
-    ANativeWindow_release(window);
-    return ok;
-}
-}
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_aetheris_engine_AetherisNative_nativeSetProjectRoot(
@@ -125,7 +101,17 @@ Java_com_aetheris_engine_AetherisNative_nativeReleaseSurface(JNIEnv*, jclass) {
 extern "C" JNIEXPORT void JNICALL
 Java_com_aetheris_engine_AetherisNative_nativeSurfaceChanged(
     JNIEnv* env, jclass, jobject surface) {
-    Java_com_aetheris_engine_AetherisNative_nativeResizeViewport(env, nullptr, surface, 0, 0);
+    if (!surface) {
+        AETHERIS_LOGW("surfaceChanged ignored: null Surface");
+        return;
+    }
+    ANativeWindow* window = ANativeWindow_fromSurface(env, surface);
+    if (!window) {
+        AETHERIS_LOGE("surfaceChanged failed: ANativeWindow_fromSurface returned null");
+        return;
+    }
+    EngineCore::Instance().OnSurfaceChanged(window);
+    ANativeWindow_release(window);
 }
 
 extern "C" JNIEXPORT void JNICALL
