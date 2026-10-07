@@ -17,7 +17,8 @@ public:
  bool Initialize(RenderAPI,ANativeWindow*);
  bool SwitchGraphicsAPI(RenderAPI,ANativeWindow*);
  bool BeginFrame(); void Draw(const RenderQueue&); void EndFrame();
- void OnSurfaceChanged(ANativeWindow*); void ApplyGizmo(const GizmoCommand&);
+ void OnSurfaceChanged(ANativeWindow*);
+ void OnSurfaceDestroyed() noexcept; void ApplyGizmo(const GizmoCommand&);
  void Shutdown() noexcept;
  RenderAPI ActiveAPI() const noexcept; SceneSnapshot SnapshotScene() const;
 };
