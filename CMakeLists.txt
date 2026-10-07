@@ -15,6 +15,7 @@ add_library(aetheris3d SHARED
     engine/world/DemoWorldInitializer.cpp
     engine/project/VirtualFileSystem.cpp
     engine/renderer/VulkanRenderer.cpp
+    engine/renderer/OfflineEnvironment.cpp
     engine/renderer/OpenGLESRenderer.cpp
     engine/renderer/AetherisRenderGraph.cpp
     engine/renderer/GPUResourceManager.cpp
