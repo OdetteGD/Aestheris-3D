@@ -380,6 +380,7 @@ public:
 
     bool Initialize(ANativeWindow*) override;
     bool EnsureDeferredResources() override;
+    void AbortDeferredResources() noexcept override;
     bool IsReady() const noexcept override;
     bool BeginFrame() override;
     void EndFrame() override;
