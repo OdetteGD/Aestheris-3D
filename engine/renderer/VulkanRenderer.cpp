@@ -4,6 +4,7 @@
 #include <cstring>
 #include <vector>
 #include <filesystem>
+#include "engine/core/AetherisLog.h"
 
 namespace aetheris {
 
@@ -18,6 +19,7 @@ constexpr const char* kValidationLayer = "VK_LAYER_KHRONOS_validation";
 
 bool VulkanRenderer::Initialize(ANativeWindow* w) {
     if (initialized_ || !w) return false;
+    AETHERIS_VK_LOGI("Initialize: native window=%p", static_cast<void*>(w));
     window_ = w;
     ANativeWindow_acquire(window_);
 
@@ -42,6 +44,9 @@ bool VulkanRenderer::Initialize(ANativeWindow* w) {
     }
 
     initialized_ = true;
+    AETHERIS_VK_LOGI("Initialize complete: Vulkan %u.%u, extent=%ux%u, swapchainImages=%zu",
+                      VK_VERSION_MAJOR(VK_VERSION_MINOR(supportedApi)),
+                      VK_VERSION_MINOR(supportedApi), extent_.width, extent_.height, images_.size());
     return true;
 }
 
@@ -83,6 +88,9 @@ bool VulkanRenderer::CreateInstance() {
     a.pEngineName = "Aetheris";
     a.apiVersion = supportedApi;
 
+    AETHERIS_VK_LOGI("Creating Vulkan instance (validation=%d, api=%u.%u)",
+                      kValidation ? 1 : 0, VK_VERSION_MAJOR(supportedApi), VK_VERSION_MINOR(supportedApi));
+
     VkInstanceCreateInfo c{VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
     c.pApplicationInfo = &a;
     c.enabledExtensionCount = static_cast<uint32_t>(x.size());
@@ -92,13 +100,18 @@ bool VulkanRenderer::CreateInstance() {
         c.enabledLayerCount = 1;
         c.ppEnabledLayerNames = &kValidationLayer;
     }
-    return vkCreateInstance(&c, nullptr, &instance_) == VK_SUCCESS;
+    const VkResult result = vkCreateInstance(&c, nullptr, &instance_);
+    if (result != VK_SUCCESS) AETHERIS_VK_LOGE("vkCreateInstance failed: %s", VkResultName(result));
+    return result == VK_SUCCESS;
 }
 
 bool VulkanRenderer::CreateSurface() {
     VkAndroidSurfaceCreateInfoKHR c{VK_STRUCTURE_TYPE_ANDROID_SURFACE_CREATE_INFO_KHR};
     c.window = window_;
-    return vkCreateAndroidSurfaceKHR(instance_, &c, nullptr, &surface_) == VK_SUCCESS;
+    const VkResult result = vkCreateAndroidSurfaceKHR(instance_, &c, nullptr, &surface_);
+    if (result != VK_SUCCESS) AETHERIS_VK_LOGE("vkCreateAndroidSurfaceKHR failed: %s", VkResultName(result));
+    else AETHERIS_VK_LOGI("Android Vulkan surface created: %p", static_cast<void*>(surface_));
+    return result == VK_SUCCESS;
 }
 
 bool VulkanRenderer::PickGPU() {
@@ -176,8 +189,13 @@ bool VulkanRenderer::CreateDevice() {
     c.ppEnabledExtensionNames = ext;
     c.pEnabledFeatures = &f;
 
-    if (vkCreateDevice(gpu_, &c, nullptr, &device_) != VK_SUCCESS) return false;
+    const VkResult result = vkCreateDevice(gpu_, &c, nullptr, &device_);
+    if (result != VK_SUCCESS) {
+        AETHERIS_VK_LOGE("vkCreateDevice failed: %s", VkResultName(result));
+        return false;
+    }
     vkGetDeviceQueue(device_, family_, 0, &queue_);
+    AETHERIS_VK_LOGI("Logical device ready: queueFamily=%u", family_);
     return true;
 }
 
@@ -232,7 +250,11 @@ bool VulkanRenderer::CreateSwapchain() {
     c.presentMode = mode;
     c.clipped = VK_TRUE;
 
-    if (vkCreateSwapchainKHR(device_, &c, nullptr, &swapchain_) != VK_SUCCESS) return false;
+    const VkResult result = vkCreateSwapchainKHR(device_, &c, nullptr, &swapchain_);
+    if (result != VK_SUCCESS) {
+        AETHERIS_VK_LOGE("vkCreateSwapchainKHR failed: %s", VkResultName(result));
+        return false;
+    }
 
     format_ = fmt.format;
     extent_ = cap.currentExtent;
@@ -240,7 +262,14 @@ bool VulkanRenderer::CreateSwapchain() {
     uint32_t in = 0;
     vkGetSwapchainImagesKHR(device_, swapchain_, &in, nullptr);
     images_.resize(in);
-    return vkGetSwapchainImagesKHR(device_, swapchain_, &in, images_.data()) == VK_SUCCESS;
+    const VkResult imageResult = vkGetSwapchainImagesKHR(device_, swapchain_, &in, images_.data());
+    if (imageResult == VK_SUCCESS) {
+        AETHERIS_VK_LOGI("Swapchain created: %ux%u images=%u format=%d presentMode=%d",
+                          extent_.width, extent_.height, in, static_cast<int>(format_), static_cast<int>(mode));
+    } else {
+        AETHERIS_VK_LOGE("vkGetSwapchainImagesKHR failed: %s", VkResultName(imageResult));
+    }
+    return imageResult == VK_SUCCESS;
 }
 
 uint32_t VulkanRenderer::FindMemoryType(uint32_t typeBits, VkMemoryPropertyFlags properties) const noexcept {
@@ -331,8 +360,12 @@ bool VulkanRenderer::Record(VkCommandBuffer cmd,uint32_t i){
     std::array<VkClearValue,5>clears{};clears[0].color={{0,0,0,1}};clears[1].color={{0.5f,0.5f,1,1}};clears[2].color={{0,0,0,1}};clears[3].depthStencil={1.0f,0};clears[4].color={{0.02f,0.03f,0.05f,1}};
     VkRenderPassBeginInfo r{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};r.renderPass=pass_;r.framebuffer=fb_[i];r.renderArea.extent=extent_;r.clearValueCount=5;r.pClearValues=clears.data();
     vkCmdBeginRenderPass(cmd,&r,VK_SUBPASS_CONTENTS_INLINE);
+    AETHERIS_VK_LOGD("Frame render pass begin: image=%u extent=%ux%u", i, extent_.width, extent_.height);
+    // Geometry subpass intentionally starts empty until real mesh/material pipelines are bound.
     vkCmdNextSubpass(cmd,VK_SUBPASS_CONTENTS_INLINE);
-    vkCmdEndRenderPass(cmd);return vkEndCommandBuffer(cmd)==VK_SUCCESS;
+    // Lighting/post subpass currently resolves the deterministic clear into the swapchain.
+    vkCmdEndRenderPass(cmd);
+    return vkEndCommandBuffer(cmd)==VK_SUCCESS;
 }
 
 bool VulkanRenderer::BeginFrame() {
@@ -344,10 +377,14 @@ bool VulkanRenderer::BeginFrame() {
     VkResult r = vkAcquireNextImageKHR(
         device_, swapchain_, UINT64_MAX, f.imageAvailable, VK_NULL_HANDLE, &image_);
     if (r == VK_ERROR_OUT_OF_DATE_KHR || r == VK_SUBOPTIMAL_KHR) {
+        AETHERIS_VK_LOGW("Acquire returned %s; recreating swapchain", VkResultName(r));
         RecreateSwapchain(nullptr);
         return false;
     }
-    if (r != VK_SUCCESS) return false;
+    if (r != VK_SUCCESS) {
+        AETHERIS_VK_LOGE("vkAcquireNextImageKHR failed: %s", VkResultName(r));
+        return false;
+    }
 
     vkResetFences(device_, 1, &f.fence);
     vkResetCommandPool(device_, f.pool, 0);
@@ -376,7 +413,9 @@ void VulkanRenderer::EndFrame() {
     s.signalSemaphoreCount = 1;
     s.pSignalSemaphores = &f.renderFinished;
 
-    if (vkQueueSubmit(queue_, 1, &s, f.fence) != VK_SUCCESS) {
+    const VkResult submitResult = vkQueueSubmit(queue_, 1, &s, f.fence);
+    if (submitResult != VK_SUCCESS) {
+        AETHERIS_VK_LOGE("vkQueueSubmit failed: %s", VkResultName(submitResult));
         begun_ = false;
         return;
     }
@@ -390,7 +429,10 @@ void VulkanRenderer::EndFrame() {
 
     VkResult r = vkQueuePresentKHR(queue_, &p);
     if (r == VK_ERROR_OUT_OF_DATE_KHR || r == VK_SUBOPTIMAL_KHR) {
+        AETHERIS_VK_LOGW("Present returned %s; rebuilding swapchain", VkResultName(r));
         RecreateSwapchain(nullptr);
+    } else if (r != VK_SUCCESS) {
+        AETHERIS_VK_LOGE("vkQueuePresentKHR failed: %s", VkResultName(r));
     }
 
     frame_ = (frame_ + 1) % Frames;
@@ -417,7 +459,9 @@ void VulkanRenderer::DestroySwapchain() noexcept {
 bool VulkanRenderer::RecreateSwapchain(ANativeWindow* w) {
     if (!device_) return false;
 
-    // The swapchain must be gone before its VkSurfaceKHR is destroyed.
+    AETHERIS_VK_LOGI("RecreateSwapchain begin: newWindow=%p currentWindow=%p",
+                      static_cast<void*>(w), static_cast<void*>(window_));
+    // Device-idle is the hard synchronization boundary for all swapchain-dependent resources.
     vkDeviceWaitIdle(device_);
     DestroySwapchain();
 
@@ -436,15 +480,18 @@ bool VulkanRenderer::RecreateSwapchain(ANativeWindow* w) {
     }
 
     if (!surface_) return false;
-    return CreateSwapchain() &&
-           CreateGBufferAttachments() &&
-           CreatePass() &&
-           CreateViews() &&
-           CreateFramebuffers();
+    const bool ok = CreateSwapchain() &&
+                    CreateGBufferAttachments() &&
+                    CreatePass() &&
+                    CreateViews() &&
+                    CreateFramebuffers();
+    AETHERIS_VK_LOGI("RecreateSwapchain complete: result=%d extent=%ux%u", ok ? 1 : 0, extent_.width, extent_.height);
+    return ok;
 }
 
 void VulkanRenderer::ReleaseSurface() noexcept {
     if (!device_) return;
+    AETHERIS_VK_LOGI("ReleaseSurface begin");
 
     begun_ = false;
     DestroySwapchain();
@@ -458,6 +505,7 @@ void VulkanRenderer::ReleaseSurface() noexcept {
         ANativeWindow_release(window_);
         window_ = nullptr;
     }
+    AETHERIS_VK_LOGI("ReleaseSurface complete");
 }
 
 void VulkanRenderer::Shutdown() noexcept {
