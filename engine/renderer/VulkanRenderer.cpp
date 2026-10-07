@@ -4952,11 +4952,38 @@ bool VulkanRenderer::CreateImageRaw(
     VkFormat format,
     VkImageUsageFlags usage,
     VkImageCreateFlags flags,
-    VkExtent3D imageExtent,
+    VkExtent3D extent,
     uint32_t arrayLayers,
     VkImage& image,
     VkDeviceMemory& memory
 ) {
+    return CreateImageRawMip(
+        format,
+        usage,
+        flags,
+        extent,
+        1,
+        arrayLayers,
+        image,
+        memory
+    );
+}
+
+bool VulkanRenderer::CreateImageRawMip(
+    VkFormat format,
+    VkImageUsageFlags usage,
+    VkImageCreateFlags flags,
+    VkExtent3D extent,
+    uint32_t mipLevels,
+    uint32_t arrayLayers,
+    VkImage& image,
+    VkDeviceMemory& memory
+) {
+    if (mipLevels == 0 ||
+        arrayLayers == 0) {
+        return false;
+    }
+
     VkImageCreateInfo info{
         VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO
     };
@@ -4964,8 +4991,8 @@ bool VulkanRenderer::CreateImageRaw(
     info.flags = flags;
     info.imageType = VK_IMAGE_TYPE_2D;
     info.format = format;
-    info.extent = imageExtent;
-    info.mipLevels = 1;
+    info.extent = extent;
+    info.mipLevels = mipLevels;
     info.arrayLayers = arrayLayers;
     info.samples = VK_SAMPLE_COUNT_1_BIT;
     info.tiling = VK_IMAGE_TILING_OPTIMAL;
@@ -4974,14 +5001,21 @@ bool VulkanRenderer::CreateImageRaw(
     info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
     if (vkCreateImage(
-            device_, &info, nullptr, &image) != VK_SUCCESS) {
+            device_,
+            &info,
+            nullptr,
+            &image
+        ) != VK_SUCCESS) {
         image = VK_NULL_HANDLE;
         return false;
     }
 
     VkMemoryRequirements requirements{};
     vkGetImageMemoryRequirements(
-        device_, image, &requirements);
+        device_,
+        image,
+        &requirements
+    );
 
     const uint32_t memoryType =
         FindMemoryType(
@@ -4990,7 +5024,11 @@ bool VulkanRenderer::CreateImageRaw(
         );
 
     if (memoryType == UINT32_MAX) {
-        vkDestroyImage(device_, image, nullptr);
+        vkDestroyImage(
+            device_,
+            image,
+            nullptr
+        );
         image = VK_NULL_HANDLE;
         return false;
     }
@@ -4999,21 +5037,44 @@ bool VulkanRenderer::CreateImageRaw(
         VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO
     };
 
-    allocation.allocationSize = requirements.size;
-    allocation.memoryTypeIndex = memoryType;
+    allocation.allocationSize =
+        requirements.size;
+    allocation.memoryTypeIndex =
+        memoryType;
 
     if (vkAllocateMemory(
-            device_, &allocation, nullptr, &memory) != VK_SUCCESS) {
-        vkDestroyImage(device_, image, nullptr);
+            device_,
+            &allocation,
+            nullptr,
+            &memory
+        ) != VK_SUCCESS) {
+        vkDestroyImage(
+            device_,
+            image,
+            nullptr
+        );
         image = VK_NULL_HANDLE;
         return false;
     }
 
     if (vkBindImageMemory(
-            device_, image, memory, 0) != VK_SUCCESS) {
-        vkFreeMemory(device_, memory, nullptr);
+            device_,
+            image,
+            memory,
+            0
+        ) != VK_SUCCESS) {
+        vkFreeMemory(
+            device_,
+            memory,
+            nullptr
+        );
         memory = VK_NULL_HANDLE;
-        vkDestroyImage(device_, image, nullptr);
+
+        vkDestroyImage(
+            device_,
+            image,
+            nullptr
+        );
         image = VK_NULL_HANDLE;
         return false;
     }
@@ -5029,6 +5090,26 @@ bool VulkanRenderer::CreateImageViewRaw(
     uint32_t layers,
     VkImageView& view
 ) {
+    return CreateImageViewRawMip(
+        image,
+        format,
+        type,
+        aspect,
+        1,
+        layers,
+        view
+    );
+}
+
+bool VulkanRenderer::CreateImageViewRawMip(
+    VkImage image,
+    VkFormat format,
+    VkImageViewType type,
+    VkImageAspectFlags aspect,
+    uint32_t mipLevels,
+    uint32_t layers,
+    VkImageView& view
+) {
     VkImageViewCreateInfo info{
         VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO
     };
@@ -5038,13 +5119,17 @@ bool VulkanRenderer::CreateImageViewRaw(
     info.format = format;
     info.subresourceRange.aspectMask = aspect;
     info.subresourceRange.baseMipLevel = 0;
-    info.subresourceRange.levelCount = 1;
+    info.subresourceRange.levelCount = mipLevels;
     info.subresourceRange.baseArrayLayer = 0;
     info.subresourceRange.layerCount = layers;
 
     const VkResult result =
         vkCreateImageView(
-            device_, &info, nullptr, &view);
+            device_,
+            &info,
+            nullptr,
+            &view
+        );
 
     if (result != VK_SUCCESS)
         view = VK_NULL_HANDLE;
