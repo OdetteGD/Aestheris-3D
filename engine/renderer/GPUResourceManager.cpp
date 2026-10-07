@@ -12,7 +12,12 @@ bool GPUResourceManager::Initialize(VkPhysicalDevice physical, VkDevice device, 
     std::vector<char> data;
     if (in) data.assign(std::istreambuf_iterator<char>(in), {});
     if (!data.empty()) { pci.initialDataSize = data.size(); pci.pInitialData = data.data(); }
-    if (vkCreatePipelineCache(device_, &pci, nullptr, &pipelineCache_) != VK_SUCCESS) return false;
+    VkResult cacheResult = vkCreatePipelineCache(device_, &pci, nullptr, &pipelineCache_);
+    if (cacheResult != VK_SUCCESS && !data.empty()) {
+        pci.initialDataSize = 0; pci.pInitialData = nullptr;
+        cacheResult = vkCreatePipelineCache(device_, &pci, nullptr, &pipelineCache_);
+    }
+    if (cacheResult != VK_SUCCESS) return false;
     return true;
 }
 
