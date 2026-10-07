@@ -92,11 +92,8 @@ void EngineCore::OnSurfaceChanged(ANativeWindow* w) {
     }
 
     if (!activeRenderer_->RecreateSwapchain(w)) {
-        // A renderer may have released its previous ANativeWindow after a surface loss.
-        // Keep the renderer alive and let the next Surface callback retry creation.
-        if (activeApi_ == RenderAPI::VULKAN) {
-            activeRenderer_->ReleaseSurface();
-        }
+        // Drop the stale surface so the next SurfaceView callback can bind a fresh one.
+        activeRenderer_->ReleaseSurface();
     }
 }
 
