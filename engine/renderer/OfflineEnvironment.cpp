@@ -88,41 +88,43 @@ bool DecodeRadianceRGBE(
     const std::vector<uint8_t>& file,
     OfflineEnvironmentData& output) noexcept
 {
+    const size_t size = file.size();
+
+    if (size < 16)
+        return false;
+
+    const size_t headerLimit =
+        std::min<size_t>(
+            size,
+            64u * 1024u
+        );
+
+    const std::string header(
+        reinterpret_cast<const char*>(
+            file.data()
+        ),
+        headerLimit
+    );
+
+    if (header.find(
+            "FORMAT=32-bit_rle_rgbe"
+        ) == std::string::npos) {
+        return false;
+    }
+
+    const size_t headerEndPos =
+        header.find("\n\n");
+
+    if (headerEndPos == std::string::npos)
+        return false;
+
     const char* ptr =
         reinterpret_cast<const char*>(
             file.data()
         );
 
-    const size_t size =
-        file.size();
-
-    const char* end =
-        ptr + size;
-
-    if (size < 16)
-        return false;
-
-    const char* format =
-        std::strstr(
-            ptr,
-            "FORMAT=32-bit_rle_rgbe"
-        );
-
-    if (!format)
-        return false;
-
     const char* headerEnd =
-        std::strstr(
-            ptr,
-            "
-
-"
-        );
-
-    if (!headerEnd)
-        return false;
-
-    headerEnd += 2;
+        ptr + headerEndPos + 2;
 
     unsigned width = 0;
     unsigned height = 0;
