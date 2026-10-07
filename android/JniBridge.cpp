@@ -120,24 +120,102 @@ Java_com_aetheris_engine_AetherisNative_nativeSurfaceChanged(
 
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_aetheris_engine_AetherisNative_nativeInitialize(
-    JNIEnv* env,jclass,jobject surface,jint api
+    JNIEnv* env,
+    jclass,
+    jobject surface,
+    jint api
 ) {
-    if (!surface) { FatalJni("nativeInitialize","null Surface"); return JNI_FALSE; }
-    ANativeWindow* window = ANativeWindow_fromSurface(env,surface);
-    if (!window) { FatalJni("nativeInitialize","ANativeWindow_fromSurface returned null"); return JNI_FALSE; }
-    const bool ok = aetheris::EngineCore::Instance().Initialize(SelectApi(api),window);
+    if (!surface) {
+        FatalJni(
+            "nativeInitialize",
+            "null Surface"
+        );
+        return JNI_FALSE;
+    }
+
+    auto& engine =
+        aetheris::EngineCore::Instance();
+
+    if (engine.State() ==
+        aetheris::EngineState::Uninitialized) {
+        FatalJni(
+            "nativeInitialize",
+            "initial renderer creation is surfaceCreated-only; use nativeRegisterEditorSurface"
+        );
+        return JNI_FALSE;
+    }
+
+    ANativeWindow* window =
+        ANativeWindow_fromSurface(
+            env,
+            surface
+        );
+
+    if (!window) {
+        FatalJni(
+            "nativeInitialize",
+            "ANativeWindow_fromSurface returned null"
+        );
+        return JNI_FALSE;
+    }
+
+    const bool ok =
+        engine.SwitchGraphicsAPI(
+            SelectApi(api),
+            window
+        );
+
     ANativeWindow_release(window);
     return ok ? JNI_TRUE : JNI_FALSE;
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_aetheris_engine_AetherisNative_nativeSwitchApi(
-    JNIEnv* env,jclass,jobject surface,jint api
+    JNIEnv* env,
+    jclass,
+    jobject surface,
+    jint api
 ) {
-    if (!surface) { FatalJni("nativeSwitchApi","null Surface"); return JNI_FALSE; }
-    ANativeWindow* window = ANativeWindow_fromSurface(env,surface);
-    if (!window) { FatalJni("nativeSwitchApi","ANativeWindow_fromSurface returned null"); return JNI_FALSE; }
-    const bool ok = aetheris::EngineCore::Instance().SwitchGraphicsAPI(SelectApi(api),window);
+    if (!surface) {
+        FatalJni(
+            "nativeSwitchApi",
+            "null Surface"
+        );
+        return JNI_FALSE;
+    }
+
+    auto& engine =
+        aetheris::EngineCore::Instance();
+
+    if (engine.State() ==
+        aetheris::EngineState::Uninitialized) {
+        FatalJni(
+            "nativeSwitchApi",
+            "renderer API switching requires an already registered SurfaceView surface"
+        );
+        return JNI_FALSE;
+    }
+
+    ANativeWindow* window =
+        ANativeWindow_fromSurface(
+            env,
+            surface
+        );
+
+    if (!window) {
+        FatalJni(
+            "nativeSwitchApi",
+            "ANativeWindow_fromSurface returned null"
+        );
+        return JNI_FALSE;
+    }
+
+    const bool ok =
+        engine.SwitchGraphicsAPI(
+            SelectApi(api),
+            window
+        );
+
     ANativeWindow_release(window);
     return ok ? JNI_TRUE : JNI_FALSE;
 }
