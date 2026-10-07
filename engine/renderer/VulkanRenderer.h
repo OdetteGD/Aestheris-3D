@@ -71,23 +71,30 @@ class VulkanRenderer final : public IAetherisRenderer {
     VkShaderModule fullscreenVert_{};
     VkShaderModule lightingFrag_{};
     VkShaderModule postFrag_{};
+    VkShaderModule shadowVert_{};
 
     VkPipelineLayout geometryLayout_{};
     VkPipelineLayout lightingLayout_{};
     VkPipelineLayout postLayout_{};
+    VkPipelineLayout shadowLayout_{};
 
     VkPipeline geometryPipeline_{};
     VkPipeline lightingPipeline_{};
     VkPipeline postPipeline_{};
+    VkPipeline shadowPipeline_{};
 
     VkDescriptorSetLayout lightingInputLayout_{};
     VkDescriptorSetLayout lightingFrameLayout_{};
     VkDescriptorSetLayout postSetLayout_{};
+    VkDescriptorSetLayout materialSetLayout_{};
+    VkDescriptorSetLayout shadowSetLayout_{};
     VkDescriptorPool descriptorPool_{};
 
     VkDescriptorSet lightingInputSet_{};
     VkDescriptorSet lightingFrameSet_{};
     VkDescriptorSet postSet_{};
+    std::array<VkDescriptorSet, kMaxDemoMeshes> materialSets_{};
+    VkDescriptorSet shadowSet_{};
 
     VkSampler linearSampler_{};
 
@@ -103,8 +110,34 @@ class VulkanRenderer final : public IAetherisRenderer {
     VkImageView brdfView_{};
     VkDeviceMemory brdfMemory_{};
 
+    VkImage csmImage_{};
+    VkImageView csmArrayView_{};
+    std::array<VkImageView, 3> csmLayerViews_{};
+    VkDeviceMemory csmMemory_{};
+    VkSampler shadowSampler_{};
+    VkRenderPass shadowPass_{};
+    std::array<VkFramebuffer, 3> shadowFramebuffers_{};
+    VkExtent2D csmExtent_{1024, 1024};
+
     GpuBuffer frameUbo_{};
     VkDeviceSize frameUboStride_{64};
+
+    struct MaterialGpu final {
+        GpuBuffer uniform{};
+        VkImage albedo{};
+        VkImageView albedoView{};
+        VkDeviceMemory albedoMemory{};
+        VkImage normal{};
+        VkImageView normalView{};
+        VkDeviceMemory normalMemory{};
+        VkImage orm{};
+        VkImageView ormView{};
+        VkDeviceMemory ormMemory{};
+    };
+    std::array<MaterialGpu, kMaxDemoMeshes> materials_{};
+
+    GpuBuffer csmUbo_{};
+    VkDeviceSize csmUboStride_{256};
 
     std::array<MeshGpu, kMaxDemoMeshes> demoMeshes_{};
 
@@ -119,6 +152,9 @@ class VulkanRenderer final : public IAetherisRenderer {
     bool frameRecorded_{false};
 
     Mat4 viewProj_{};
+    Mat4 invViewProj_{};
+    std::array<Mat4, 3> csmMatrices_{};
+    std::array<float, 3> csmSplits_{};
 
     bool CreateInstance();
     bool CreateSurface();
@@ -140,6 +176,8 @@ class VulkanRenderer final : public IAetherisRenderer {
     bool CreatePipelines();
     bool CreateFrameUniformBuffer();
     bool CreateDefaultIBL();
+    bool CreateMaterialResources();
+    bool CreateCSMResources();
     bool CreateDemoMeshes();
 
     bool UploadBufferToDeviceLocal(
@@ -186,9 +224,11 @@ class VulkanRenderer final : public IAetherisRenderer {
     );
 
     bool CreateOneTimeCommand(VkCommandBuffer& commandBuffer);
+    bool CreateProceduralMaterialTexture(uint32_t materialId, uint32_t kind, VkImage& image, VkDeviceMemory& memory, VkImageView& view);
     void DestroyOneTimeCommand(VkCommandBuffer commandBuffer) noexcept;
 
     bool UpdateFrameUniforms() noexcept;
+    bool UpdateCSMUniforms() noexcept;
     void UpdateCamera() noexcept;
 
     static Mat4 Identity() noexcept;
@@ -201,6 +241,9 @@ class VulkanRenderer final : public IAetherisRenderer {
         float ex, float ey, float ez,
         float cx, float cy, float cz
     ) noexcept;
+    static Mat4 Inverse(const Mat4& m) noexcept;
+    static Mat4 MakeLookAtLight(const Vec4& direction, float cx, float cy, float cz) noexcept;
+    static Mat4 MakeOrthographic(float l, float r, float b, float t, float n, float f) noexcept;
     static Mat4 MakePerspective(
         float fovRadians,
         float aspect,
@@ -216,6 +259,8 @@ class VulkanRenderer final : public IAetherisRenderer {
     void DestroyDescriptors() noexcept;
     void DestroyDemoMeshes() noexcept;
     void DestroyDefaultIBL() noexcept;
+    void DestroyMaterialResources() noexcept;
+    void DestroyCSMResources() noexcept;
     void DestroyGBufferAttachments() noexcept;
     void DestroySwapchain() noexcept;
 
