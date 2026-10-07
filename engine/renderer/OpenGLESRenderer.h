@@ -1,5 +1,6 @@
 #pragma once
 #include "IAetherisRenderer.h"
+#include <span>
 #include <EGL/egl.h>
 #include <cstdint>
 
