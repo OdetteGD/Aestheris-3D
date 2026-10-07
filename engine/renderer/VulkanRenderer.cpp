@@ -976,68 +976,140 @@ void VulkanRenderer::DestroySwapchain() noexcept {
     if (!device_) return;
 
     vkDeviceWaitIdle(device_);
-    for (auto x : fb_) if (x) vkDestroyFramebuffer(device_, x, nullptr);
-    for (auto x : views_) if (x) vkDestroyImageView(device_, x, nullptr);
-    if (pass_) vkDestroyRenderPass(device_, pass_, nullptr);
-    if (swapchain_) vkDestroySwapchainKHR(device_, swapchain_, nullptr);
 
-    fb_.clear();
+    DestroyPipelines();
+    DestroyDescriptors();
+
+    for (VkFramebuffer fb : postFramebuffers_)
+        if (fb) vkDestroyFramebuffer(device_, fb, nullptr);
+
+    for (VkFramebuffer fb : framebuffers_)
+        if (fb) vkDestroyFramebuffer(device_, fb, nullptr);
+
+    if (postPass_)
+        vkDestroyRenderPass(device_, postPass_, nullptr);
+
+    if (pass_)
+        vkDestroyRenderPass(device_, pass_, nullptr);
+
+    if (hdrView_)
+        vkDestroyImageView(device_, hdrView_, nullptr);
+
+    if (hdrImage_)
+        vkDestroyImage(device_, hdrImage_, nullptr);
+
+    if (hdrMemory_)
+        vkFreeMemory(device_, hdrMemory_, nullptr);
+
+    hdrView_ = VK_NULL_HANDLE;
+    hdrImage_ = VK_NULL_HANDLE;
+    hdrMemory_ = VK_NULL_HANDLE;
+
+    DestroyGBufferAttachments();
+
+    for (VkImageView view : views_)
+        if (view) vkDestroyImageView(device_, view, nullptr);
+
+    if (swapchain_)
+        vkDestroySwapchainKHR(device_, swapchain_, nullptr);
+
+    postPass_ = VK_NULL_HANDLE;
+    pass_ = VK_NULL_HANDLE;
+    swapchain_ = VK_NULL_HANDLE;
+
+    framebuffers_.clear();
+    postFramebuffers_.clear();
     views_.clear();
     images_.clear();
-    pass_ = {};
-    swapchain_ = {};
-    DestroyGBufferAttachments();
+
+    image_ = UINT32_MAX;
 }
 
 bool VulkanRenderer::RecreateSwapchain(ANativeWindow* w) {
     if (!device_) return false;
 
-    AETHERIS_VK_LOGI("RecreateSwapchain begin: newWindow=%p currentWindow=%p",
-                      static_cast<void*>(w), static_cast<void*>(window_));
-    // Device-idle is the hard synchronization boundary for all swapchain-dependent resources.
+    AETHERIS_VK_LOGI(
+        "RecreateSwapchain begin: new=%p old=%p",
+        static_cast<void*>(w),
+        static_cast<void*>(window_)
+    );
+
     vkDeviceWaitIdle(device_);
     DestroySwapchain();
 
     if (w && (w != window_ || !surface_)) {
         if (surface_) {
-            vkDestroySurfaceKHR(instance_, surface_, nullptr);
-            surface_ = {};
+            vkDestroySurfaceKHR(
+                instance_,
+                surface_,
+                nullptr
+            );
+            surface_ = VK_NULL_HANDLE;
         }
+
         if (window_) {
             ANativeWindow_release(window_);
             window_ = nullptr;
         }
+
         window_ = w;
         ANativeWindow_acquire(window_);
-        if (!CreateSurface()) return false;
+
+        if (!CreateSurface())
+            return false;
     }
 
-    if (!surface_) return false;
-    const bool ok = CreateSwapchain() &&
-                    CreateGBufferAttachments() &&
-                    CreatePass() &&
-                    CreateViews() &&
-                    CreateFramebuffers();
-    AETHERIS_VK_LOGI("RecreateSwapchain complete: result=%d extent=%ux%u", ok ? 1 : 0, extent_.width, extent_.height);
+    if (!surface_)
+        return false;
+
+    const bool ok =
+        CreateSwapchain() &&
+        CreateGBufferAttachments() &&
+        CreateHDRTarget() &&
+        CreatePasses() &&
+        CreateViews() &&
+        CreateFramebuffers() &&
+        CreateDescriptorPoolAndSets() &&
+        CreatePipelines();
+
+    if (ok)
+        UpdateCamera();
+
+    AETHERIS_VK_LOGI(
+        "RecreateSwapchain complete: result=%d extent=%ux%u",
+        ok ? 1 : 0,
+        extent_.width,
+        extent_.height
+    );
+
     return ok;
 }
 
 void VulkanRenderer::ReleaseSurface() noexcept {
     if (!device_) return;
+
     AETHERIS_VK_LOGI("ReleaseSurface begin");
 
     begun_ = false;
+    mainRenderPassActive_ = false;
+    frameRecorded_ = false;
+
     DestroySwapchain();
 
     if (surface_) {
-        vkDestroySurfaceKHR(instance_, surface_, nullptr);
-        surface_ = {};
+        vkDestroySurfaceKHR(
+            instance_,
+            surface_,
+            nullptr
+        );
+        surface_ = VK_NULL_HANDLE;
     }
 
     if (window_) {
         ANativeWindow_release(window_);
         window_ = nullptr;
     }
+
     AETHERIS_VK_LOGI("ReleaseSurface complete");
 }
 
@@ -1048,32 +1120,109 @@ void VulkanRenderer::Shutdown() noexcept {
         resources_.SavePipelineCache(
             projectRoot_.empty()
                 ? std::filesystem::path("cache/pipelines/aetheris_vk.bin")
-                : projectRoot_ / "cache/pipelines/aetheris_vk.bin");
-
-        for (auto& f : frames_) {
-            if (f.fence) vkDestroyFence(device_, f.fence, nullptr);
-            if (f.renderFinished) vkDestroySemaphore(device_, f.renderFinished, nullptr);
-            if (f.imageAvailable) vkDestroySemaphore(device_, f.imageAvailable, nullptr);
-            if (f.pool) vkDestroyCommandPool(device_, f.pool, nullptr);
-        }
+                : projectRoot_ / "cache/pipelines/aetheris_vk.bin"
+        );
 
         DestroySwapchain();
+        DestroyDemoMeshes();
+
+        if (frameUbo_.buffer)
+            resources_.DestroyBuffer(frameUbo_);
+
+        if (geometryVert_)
+            vkDestroyShaderModule(device_, geometryVert_, nullptr);
+        if (geometryFrag_)
+            vkDestroyShaderModule(device_, geometryFrag_, nullptr);
+        if (fullscreenVert_)
+            vkDestroyShaderModule(device_, fullscreenVert_, nullptr);
+        if (lightingFrag_)
+            vkDestroyShaderModule(device_, lightingFrag_, nullptr);
+        if (postFrag_)
+            vkDestroyShaderModule(device_, postFrag_, nullptr);
+
+        geometryVert_ = VK_NULL_HANDLE;
+        geometryFrag_ = VK_NULL_HANDLE;
+        fullscreenVert_ = VK_NULL_HANDLE;
+        lightingFrag_ = VK_NULL_HANDLE;
+        postFrag_ = VK_NULL_HANDLE;
+
+        if (postLayout_)
+            vkDestroyPipelineLayout(device_, postLayout_, nullptr);
+        if (lightingLayout_)
+            vkDestroyPipelineLayout(device_, lightingLayout_, nullptr);
+        if (geometryLayout_)
+            vkDestroyPipelineLayout(device_, geometryLayout_, nullptr);
+
+        postLayout_ = VK_NULL_HANDLE;
+        lightingLayout_ = VK_NULL_HANDLE;
+        geometryLayout_ = VK_NULL_HANDLE;
+
+        if (postSetLayout_)
+            vkDestroyDescriptorSetLayout(device_, postSetLayout_, nullptr);
+        if (lightingFrameLayout_)
+            vkDestroyDescriptorSetLayout(device_, lightingFrameLayout_, nullptr);
+        if (lightingInputLayout_)
+            vkDestroyDescriptorSetLayout(device_, lightingInputLayout_, nullptr);
+
+        postSetLayout_ = VK_NULL_HANDLE;
+        lightingFrameLayout_ = VK_NULL_HANDLE;
+        lightingInputLayout_ = VK_NULL_HANDLE;
+
+        DestroyDefaultIBL();
+
+        for (Frame& frame : frames_) {
+            if (frame.fence)
+                vkDestroyFence(device_, frame.fence, nullptr);
+
+            if (frame.renderFinished)
+                vkDestroySemaphore(device_, frame.renderFinished, nullptr);
+
+            if (frame.imageAvailable)
+                vkDestroySemaphore(device_, frame.imageAvailable, nullptr);
+
+            if (frame.pool)
+                vkDestroyCommandPool(device_, frame.pool, nullptr);
+
+            frame = {};
+        }
+
         resources_.Shutdown();
+
         vkDestroyDevice(device_, nullptr);
+        device_ = VK_NULL_HANDLE;
     }
 
-    if (surface_) vkDestroySurfaceKHR(instance_, surface_, nullptr);
-    if (instance_) vkDestroyInstance(instance_, nullptr);
-    if (window_) ANativeWindow_release(window_);
+    if (surface_) {
+        vkDestroySurfaceKHR(
+            instance_,
+            surface_,
+            nullptr
+        );
+        surface_ = VK_NULL_HANDLE;
+    }
 
-    instance_ = {};
-    surface_ = {};
-    gpu_ = {};
-    device_ = {};
-    queue_ = {};
-    window_ = {};
+    if (instance_) {
+        vkDestroyInstance(
+            instance_,
+            nullptr
+        );
+        instance_ = VK_NULL_HANDLE;
+    }
+
+    if (window_) {
+        ANativeWindow_release(window_);
+        window_ = nullptr;
+    }
+
+    gpu_ = VK_NULL_HANDLE;
+    queue_ = VK_NULL_HANDLE;
     family_ = UINT32_MAX;
-    initialized_ = begun_ = false;
+    initialized_ = false;
+    begun_ = false;
+    mainRenderPassActive_ = false;
+    frameRecorded_ = false;
+    frame_ = 0;
+    image_ = UINT32_MAX;
 }
 
 uint64_t VulkanRenderer::CreateOffscreenRenderTarget(uint32_t, uint32_t) { return 0; }
