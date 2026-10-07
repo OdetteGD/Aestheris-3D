@@ -67,7 +67,7 @@ class EditorGizmo final {
         GizmoAxis axis,
         float gizmoScale,
         GizmoPick& out
-    ) noexcept;
+    ) const noexcept;
 
     bool PickRotateRing(
         const EditorRay& ray,
@@ -92,7 +92,7 @@ public:
         const glm::vec3& pivot,
         float gizmoScale,
         GizmoPick& out
-    ) const noexcept;
+    ) noexcept;
 
     bool BeginDrag(
         const EditorRay& ray,
