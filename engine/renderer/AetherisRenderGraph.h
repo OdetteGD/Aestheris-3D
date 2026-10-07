@@ -100,6 +100,7 @@ public:
     ResourceHandle CreateBuffer(const RenderResourceDesc& desc) noexcept;
     void ImportImage(ResourceHandle h, VkImage image, VkImageLayout layout) noexcept;
     void ImportBuffer(ResourceHandle h, VkBuffer buffer) noexcept;
+    void MarkExported(ResourceHandle h) noexcept;
     Builder AddPass(const char* name, RenderPassType type, RenderGraphPass::ExecuteFn fn, void* user = nullptr) noexcept;
     bool Compile() noexcept;
     void Execute(VkCommandBuffer cmd, RenderGraphContext& context) noexcept;
