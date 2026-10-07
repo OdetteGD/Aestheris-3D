@@ -15,6 +15,30 @@
 namespace aetheris {
 
 namespace {
+struct alignas(16) PostPushConstants final {
+    float exposure{1.15f};
+    float invWidth{};
+    float invHeight{};
+    float bloomStrength{0.22f};
+};
+
+struct DemoMaterial final {
+    Vec4 color{};
+    float metallic{};
+    float roughness{};
+    float ao{};
+};
+
+constexpr std::array<DemoMaterial, kMaxDemoMeshes> kMaterials = {{
+    {{0.18f, 0.28f, 0.42f, 1.0f}, 0.00f, 0.86f, 1.00f},
+    {{0.22f, 0.28f, 0.36f, 1.0f}, 0.08f, 0.68f, 1.00f},
+    {{0.16f, 0.36f, 0.52f, 1.0f}, 0.02f, 0.54f, 1.00f},
+    {{0.28f, 0.40f, 0.52f, 1.0f}, 0.00f, 0.74f, 1.00f},
+    {{0.60f, 0.27f, 0.07f, 1.0f}, 0.00f, 0.62f, 1.00f},
+    {{0.34f, 0.38f, 0.44f, 1.0f}, 0.00f, 0.70f, 1.00f},
+    {{0.22f, 0.26f, 0.32f, 1.0f}, 0.00f, 0.80f, 1.00f}
+}};
+
 #if defined(NDEBUG)
 constexpr bool kValidation = false;
 #else
