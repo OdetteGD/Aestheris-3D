@@ -5104,6 +5104,9 @@ bool VulkanRenderer::CreateDefaultIBL() {
         return false;
     }
 
+    prefilteredMipLevels_ =
+        specularMipLevels;
+
     environmentMipLevels_ =
         std::max(
             specularMipLevels,
@@ -5160,10 +5163,63 @@ bool VulkanRenderer::CreateDefaultIBL() {
         }
     }
 
-    if (!environmentView_)
-        LoadOfflineEnvironment();
+    if (!environmentView_) {
+        if (!LoadOfflineEnvironment()) {
+            const std::array<uint8_t,4> neutral = {
+                36, 52, 84, 255
+            };
 
-    return true;
+            if (!CreateImageRaw(
+                    VK_FORMAT_R8G8B8A8_UNORM,
+                    VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                        VK_IMAGE_USAGE_SAMPLED_BIT,
+                    VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT,
+                    {1,1,1},
+                    6,
+                    environmentImage_,
+                    environmentMemory_
+                ) ||
+                !CreateImageViewRaw(
+                    environmentImage_,
+                    VK_FORMAT_R8G8B8A8_UNORM,
+                    VK_IMAGE_VIEW_TYPE_CUBE,
+                    VK_IMAGE_ASPECT_COLOR_BIT,
+                    6,
+                    environmentView_
+                )) {
+                return false;
+            }
+
+            std::array<VkBufferImageCopy,6> copies{};
+            for(uint32_t face=0;face<6;++face) {
+                copies[face].imageSubresource = {
+                    VK_IMAGE_ASPECT_COLOR_BIT,
+                    0,
+                    face,
+                    1
+                };
+                copies[face].imageExtent = {
+                    1,1,1
+                };
+            }
+
+            if (!UploadImage(
+                    environmentImage_,
+                    neutral.data(),
+                    neutral.size(),
+                    copies.data(),
+                    6
+                )) {
+                return false;
+            }
+
+            AETHERIS_VK_LOGW(
+                "Offline HDR environment unavailable; using minimal safety cubemap"
+            );
+        }
+    }
+
+    return environmentView_ != VK_NULL_HANDLE;
 }
 
 bool VulkanRenderer::UpdateFrameUniforms() noexcept {
