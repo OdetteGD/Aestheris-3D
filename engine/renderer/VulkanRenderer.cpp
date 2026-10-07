@@ -349,9 +349,78 @@ bool VulkanRenderer::CreateGBufferAttachments(){
     const VkFormat candidates[]={VK_FORMAT_D32_SFLOAT,VK_FORMAT_D24_UNORM_S8_UINT,VK_FORMAT_D16_UNORM};depthFormat_=VK_FORMAT_UNDEFINED;
     for(VkFormat f:candidates){VkFormatProperties p{};vkGetPhysicalDeviceFormatProperties(gpu_,f,&p);if(p.optimalTilingFeatures&VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT){depthFormat_=f;break;}}
     if(depthFormat_==VK_FORMAT_UNDEFINED){DestroyGBufferAttachments();return false;}const VkImageUsageFlags du=VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT|VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
-    if(!CreateAttachmentImage(depthFormat_,du,depthImage_,depthMemory_,depthView_,VK_IMAGE_ASPECT_DEPTH_BIT)){DestroyGBufferAttachments();return false;}return true;
+    const VkImageUsageFlags depthUsage =
+        VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT |
+        VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT |
+        VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT;
+
+    if (!CreateAttachmentImage(
+            depthFormat_,
+            depthUsage,
+            depthImage_,
+            depthMemory_,
+            depthView_,
+            VK_IMAGE_ASPECT_DEPTH_BIT)) {
+        DestroyGBufferAttachments();
+        return false;
+    }
+
+    const VkImageUsageFlags ssaoUsage =
+        VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT |
+        VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+        VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT;
+
+    if (!CreateAttachmentImage(
+            ssaoFormat_,
+            ssaoUsage,
+            ssaoImage_,
+            ssaoMemory_,
+            ssaoView_,
+            VK_IMAGE_ASPECT_COLOR_BIT)) {
+        DestroyGBufferAttachments();
+        return false;
+    }
+
+    return true;
 }
-void VulkanRenderer::DestroyGBufferAttachments() noexcept{if(!device_)return;for(size_t i=0;i<3;++i){if(gbufferViews_[i])vkDestroyImageView(device_,gbufferViews_[i],nullptr);if(gbufferImages_[i])vkDestroyImage(device_,gbufferImages_[i],nullptr);if(gbufferMemory_[i])vkFreeMemory(device_,gbufferMemory_[i],nullptr);gbufferViews_[i]={};gbufferImages_[i]={};gbufferMemory_[i]={};}if(depthView_)vkDestroyImageView(device_,depthView_,nullptr);if(depthImage_)vkDestroyImage(device_,depthImage_,nullptr);if(depthMemory_)vkFreeMemory(device_,depthMemory_,nullptr);depthView_={};depthImage_={};depthMemory_={};}
+void VulkanRenderer::DestroyGBufferAttachments() noexcept {
+    if (!device_) return;
+
+    for (size_t i = 0; i < 3; ++i) {
+        if (gbufferViews_[i])
+            vkDestroyImageView(device_,gbufferViews_[i],nullptr);
+        if (gbufferImages_[i])
+            vkDestroyImage(device_,gbufferImages_[i],nullptr);
+        if (gbufferMemory_[i])
+            vkFreeMemory(device_,gbufferMemory_[i],nullptr);
+
+        gbufferViews_[i] = {};
+        gbufferImages_[i] = {};
+        gbufferMemory_[i] = {};
+    }
+
+    if (ssaoView_)
+        vkDestroyImageView(device_,ssaoView_,nullptr);
+    if (ssaoImage_)
+        vkDestroyImage(device_,ssaoImage_,nullptr);
+    if (ssaoMemory_)
+        vkFreeMemory(device_,ssaoMemory_,nullptr);
+
+    ssaoView_ = {};
+    ssaoImage_ = {};
+    ssaoMemory_ = {};
+
+    if (depthView_)
+        vkDestroyImageView(device_,depthView_,nullptr);
+    if (depthImage_)
+        vkDestroyImage(device_,depthImage_,nullptr);
+    if (depthMemory_)
+        vkFreeMemory(device_,depthMemory_,nullptr);
+
+    depthView_ = {};
+    depthImage_ = {};
+    depthMemory_ = {};
+}
 bool VulkanRenderer::CreatePasses() {
     std::array<VkAttachmentDescription, 5> attachments{};
 
