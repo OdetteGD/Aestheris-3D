@@ -59,7 +59,7 @@ GpuImage GPUResourceManager::CreateImage(const VkImageCreateInfo& info, VkImageA
     if (vkCreateImage(device_, &info, nullptr, &out.image) != VK_SUCCESS) return out;
     VkMemoryRequirements req{};
     vkGetImageMemoryRequirements(device_, out.image, &req);
-    out.allocation = Allocate(req, flags, !info.tiling == VK_IMAGE_TILING_LINEAR);
+    out.allocation = Allocate(req, flags, info.tiling == VK_IMAGE_TILING_LINEAR);
     if (!out.allocation.memory || vkBindImageMemory(device_, out.image, out.allocation.memory, out.allocation.offset) != VK_SUCCESS) {
         vkDestroyImage(device_, out.image, nullptr); out = {}; return out;
     }
