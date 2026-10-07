@@ -1326,6 +1326,7 @@ void VulkanRenderer::DestroySwapchain() noexcept {
 
     DestroyPipelines();
     DestroyDescriptors();
+    DestroyBloomResources();
 
     for (VkFramebuffer fb : postFramebuffers_)
         if (fb) vkDestroyFramebuffer(device_, fb, nullptr);
@@ -4834,31 +4835,56 @@ bool VulkanRenderer::CreateImageViewRaw(
 void VulkanRenderer::DestroyPipelines() noexcept {
     if (!device_) return;
 
-    if (postPipeline_)
-        vkDestroyPipeline(device_, postPipeline_, nullptr);
+    const VkPipeline pipelines[] = {
+        postPipeline_,
+        bloomUpPipeline_,
+        bloomDownPipeline_,
+        lightingPipeline_,
+        geometryPipeline_,
+        shadowPipeline_
+    };
 
-    if (lightingPipeline_)
-        vkDestroyPipeline(device_, lightingPipeline_, nullptr);
-
-    if (geometryPipeline_)
-        vkDestroyPipeline(device_, geometryPipeline_, nullptr);
+    for (VkPipeline pipeline : pipelines) {
+        if (pipeline) {
+            vkDestroyPipeline(
+                device_,
+                pipeline,
+                nullptr
+            );
+        }
+    }
 
     postPipeline_ = VK_NULL_HANDLE;
+    bloomUpPipeline_ = VK_NULL_HANDLE;
+    bloomDownPipeline_ = VK_NULL_HANDLE;
     lightingPipeline_ = VK_NULL_HANDLE;
     geometryPipeline_ = VK_NULL_HANDLE;
+    shadowPipeline_ = VK_NULL_HANDLE;
 }
 
 void VulkanRenderer::DestroyDescriptors() noexcept {
     if (!device_) return;
 
-    if (descriptorPool_)
+    if (descriptorPool_) {
         vkDestroyDescriptorPool(
-            device_, descriptorPool_, nullptr);
+            device_,
+            descriptorPool_,
+            nullptr
+        );
+    }
 
     descriptorPool_ = VK_NULL_HANDLE;
     lightingInputSet_ = VK_NULL_HANDLE;
     lightingFrameSet_ = VK_NULL_HANDLE;
     postSet_ = VK_NULL_HANDLE;
+    bloomDownSet_ = VK_NULL_HANDLE;
+    bloomUpSet_ = VK_NULL_HANDLE;
+    shadowSet_ = VK_NULL_HANDLE;
+
+    for (VkDescriptorSet& set :
+         materialSets_) {
+        set = VK_NULL_HANDLE;
+    }
 }
 
 void VulkanRenderer::DestroyDemoMeshes() noexcept {
@@ -4873,28 +4899,74 @@ void VulkanRenderer::DestroyDefaultIBL() noexcept {
     if (!device_) return;
 
     if (brdfView_)
-        vkDestroyImageView(device_, brdfView_, nullptr);
+        vkDestroyImageView(
+            device_,
+            brdfView_,
+            nullptr
+        );
+
     if (brdfImage_)
-        vkDestroyImage(device_, brdfImage_, nullptr);
+        vkDestroyImage(
+            device_,
+            brdfImage_,
+            nullptr
+        );
+
     if (brdfMemory_)
-        vkFreeMemory(device_, brdfMemory_, nullptr);
+        vkFreeMemory(
+            device_,
+            brdfMemory_,
+            nullptr
+        );
 
     if (prefilteredView_)
-        vkDestroyImageView(device_, prefilteredView_, nullptr);
+        vkDestroyImageView(
+            device_,
+            prefilteredView_,
+            nullptr
+        );
+
     if (prefilteredImage_)
-        vkDestroyImage(device_, prefilteredImage_, nullptr);
+        vkDestroyImage(
+            device_,
+            prefilteredImage_,
+            nullptr
+        );
+
     if (prefilteredMemory_)
-        vkFreeMemory(device_, prefilteredMemory_, nullptr);
+        vkFreeMemory(
+            device_,
+            prefilteredMemory_,
+            nullptr
+        );
 
     if (irradianceView_)
-        vkDestroyImageView(device_, irradianceView_, nullptr);
+        vkDestroyImageView(
+            device_,
+            irradianceView_,
+            nullptr
+        );
+
     if (irradianceImage_)
-        vkDestroyImage(device_, irradianceImage_, nullptr);
+        vkDestroyImage(
+            device_,
+            irradianceImage_,
+            nullptr
+        );
+
     if (irradianceMemory_)
-        vkFreeMemory(device_, irradianceMemory_, nullptr);
+        vkFreeMemory(
+            device_,
+            irradianceMemory_,
+            nullptr
+        );
 
     if (linearSampler_)
-        vkDestroySampler(device_, linearSampler_, nullptr);
+        vkDestroySampler(
+            device_,
+            linearSampler_,
+            nullptr
+        );
 
     brdfView_ = VK_NULL_HANDLE;
     brdfImage_ = VK_NULL_HANDLE;
@@ -5649,6 +5721,245 @@ bool VulkanRenderer::CreateBloomResources() {
     }
 
     return true;
+}
+
+
+void VulkanRenderer::DestroyMaterialResources() noexcept {
+    if (!device_) return;
+
+    for (MaterialGpu& material :
+         materials_) {
+        resources_.DestroyBuffer(
+            material.uniform
+        );
+
+        if (material.albedoView)
+            vkDestroyImageView(
+                device_,
+                material.albedoView,
+                nullptr
+            );
+        if (material.albedo)
+            vkDestroyImage(
+                device_,
+                material.albedo,
+                nullptr
+            );
+        if (material.albedoMemory)
+            vkFreeMemory(
+                device_,
+                material.albedoMemory,
+                nullptr
+            );
+
+        if (material.normalView)
+            vkDestroyImageView(
+                device_,
+                material.normalView,
+                nullptr
+            );
+        if (material.normal)
+            vkDestroyImage(
+                device_,
+                material.normal,
+                nullptr
+            );
+        if (material.normalMemory)
+            vkFreeMemory(
+                device_,
+                material.normalMemory,
+                nullptr
+            );
+
+        if (material.ormView)
+            vkDestroyImageView(
+                device_,
+                material.ormView,
+                nullptr
+            );
+        if (material.orm)
+            vkDestroyImage(
+                device_,
+                material.orm,
+                nullptr
+            );
+        if (material.ormMemory)
+            vkFreeMemory(
+                device_,
+                material.ormMemory,
+                nullptr
+            );
+
+        material = {};
+    }
+}
+
+void VulkanRenderer::DestroyCSMResources() noexcept {
+    if (!device_) return;
+
+    for (VkFramebuffer framebuffer :
+         shadowFramebuffers_) {
+        if (framebuffer) {
+            vkDestroyFramebuffer(
+                device_,
+                framebuffer,
+                nullptr
+            );
+        }
+    }
+
+    if (shadowPass_)
+        vkDestroyRenderPass(
+            device_,
+            shadowPass_,
+            nullptr
+        );
+
+    for (VkImageView view :
+         csmLayerViews_) {
+        if (view) {
+            vkDestroyImageView(
+                device_,
+                view,
+                nullptr
+            );
+        }
+    }
+
+    if (csmArrayView_)
+        vkDestroyImageView(
+            device_,
+            csmArrayView_,
+            nullptr
+        );
+
+    if (csmImage_)
+        vkDestroyImage(
+            device_,
+            csmImage_,
+            nullptr
+        );
+
+    if (csmMemory_)
+        vkFreeMemory(
+            device_,
+            csmMemory_,
+            nullptr
+        );
+
+    if (shadowSampler_)
+        vkDestroySampler(
+            device_,
+            shadowSampler_,
+            nullptr
+        );
+
+    if (csmUbo_.buffer)
+        resources_.DestroyBuffer(
+            csmUbo_
+        );
+
+    shadowFramebuffers_.fill(VK_NULL_HANDLE);
+    csmLayerViews_.fill(VK_NULL_HANDLE);
+    csmArrayView_ = VK_NULL_HANDLE;
+    csmImage_ = VK_NULL_HANDLE;
+    csmMemory_ = VK_NULL_HANDLE;
+    shadowSampler_ = VK_NULL_HANDLE;
+    shadowPass_ = VK_NULL_HANDLE;
+}
+
+void VulkanRenderer::DestroyBloomResources() noexcept {
+    if (!device_) return;
+
+    for (VkFramebuffer framebuffer :
+         bloomDownFramebuffers_) {
+        if (framebuffer) {
+            vkDestroyFramebuffer(
+                device_,
+                framebuffer,
+                nullptr
+            );
+        }
+    }
+
+    for (VkFramebuffer framebuffer :
+         bloomUpFramebuffers_) {
+        if (framebuffer) {
+            vkDestroyFramebuffer(
+                device_,
+                framebuffer,
+                nullptr
+            );
+        }
+    }
+
+    if (bloomDownPass_)
+        vkDestroyRenderPass(
+            device_,
+            bloomDownPass_,
+            nullptr
+        );
+
+    if (bloomUpPass_)
+        vkDestroyRenderPass(
+            device_,
+            bloomUpPass_,
+            nullptr
+        );
+
+    if (bloomAView_)
+        vkDestroyImageView(
+            device_,
+            bloomAView_,
+            nullptr
+        );
+
+    if (bloomA_)
+        vkDestroyImage(
+            device_,
+            bloomA_,
+            nullptr
+        );
+
+    if (bloomAMemory_)
+        vkFreeMemory(
+            device_,
+            bloomAMemory_,
+            nullptr
+        );
+
+    if (bloomBView_)
+        vkDestroyImageView(
+            device_,
+            bloomBView_,
+            nullptr
+        );
+
+    if (bloomB_)
+        vkDestroyImage(
+            device_,
+            bloomB_,
+            nullptr
+        );
+
+    if (bloomBMemory_)
+        vkFreeMemory(
+            device_,
+            bloomBMemory_,
+            nullptr
+        );
+
+    bloomDownFramebuffers_.fill(VK_NULL_HANDLE);
+    bloomUpFramebuffers_.fill(VK_NULL_HANDLE);
+    bloomDownPass_ = VK_NULL_HANDLE;
+    bloomUpPass_ = VK_NULL_HANDLE;
+    bloomAView_ = VK_NULL_HANDLE;
+    bloomA_ = VK_NULL_HANDLE;
+    bloomAMemory_ = VK_NULL_HANDLE;
+    bloomBView_ = VK_NULL_HANDLE;
+    bloomB_ = VK_NULL_HANDLE;
+    bloomBMemory_ = VK_NULL_HANDLE;
+    bloomExtent_ = {};
 }
 
 } // namespace aetheris
