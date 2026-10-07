@@ -24,7 +24,7 @@ _Unwind_Reason_Code TraceFrame(_Unwind_Context* context, void* opaque) noexcept 
     if (pc) {
         __android_log_print(
             ANDROID_LOG_ERROR,
-            "AetherisEngine_Fatal",
+            "AetherisEditor_GLES",
             "jni-stack[%u] pc=0x%" PRIxPTR,
             *depth,
             pc
@@ -41,7 +41,7 @@ void FatalJni(
 ) noexcept {
     __android_log_print(
         ANDROID_LOG_ERROR,
-        "AetherisEngine_Fatal",
+        "AetherisEditor_GLES",
         "%s failed: %s (%s:%u %s)",
         operation,
         reason,
@@ -80,7 +80,7 @@ Java_com_aetheris_engine_AetherisNative_nativeRegisterEditorSurface(
     engine.OnSurfaceChanged(window);
     __android_log_print(
         ANDROID_LOG_INFO,
-        "AetherisEngine",
+        "AetherisEditor_GLES",
         "nativeRegisterEditorSurface -> %s",
         StateName(engine.State())
     );
@@ -98,6 +98,8 @@ Java_com_aetheris_engine_AetherisNative_nativeResizeViewport(
     ANativeWindow* window = ANativeWindow_fromSurface(env,surface);
     if (!window) { FatalJni("nativeResizeViewport","ANativeWindow_fromSurface returned null"); return; }
     auto& engine = aetheris::EngineCore::Instance();
+    __android_log_print(ANDROID_LOG_INFO, "AetherisEditor_GLES",
+        "nativeResizeViewport extent=%dx%d", static_cast<int>(width), static_cast<int>(height));
     engine.OnSurfaceChanged(window);
     ANativeWindow_release(window);
 }

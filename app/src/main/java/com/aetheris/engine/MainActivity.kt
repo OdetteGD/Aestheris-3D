@@ -1,7 +1,12 @@
 package com.aetheris.engine
 
 import android.app.Activity
+import android.graphics.Color
 import android.os.Bundle
+import android.view.Gravity
+import android.view.View
+import android.widget.FrameLayout
+import android.widget.TextView
 import java.io.File
 
 class MainActivity : Activity() {
@@ -24,7 +29,36 @@ class MainActivity : Activity() {
         AetherisNative.nativeSetProjectRoot(projectRoot)
 
         viewport = AetherisEditorViewport(this)
-        setContentView(viewport)
+
+        val root = FrameLayout(this)
+        root.addView(
+            viewport,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            )
+        )
+
+        val overlay = TextView(this).apply {
+            text = "AETHERIS  •  GLES3 mobile viewport"
+            setTextColor(Color.WHITE)
+            setBackgroundColor(0x990B1420.toInt())
+            setPadding(18, 10, 18, 10)
+            gravity = Gravity.CENTER_VERTICAL
+            isClickable = false
+            isFocusable = false
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        }
+
+        val overlayParams = FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.WRAP_CONTENT,
+            FrameLayout.LayoutParams.WRAP_CONTENT,
+            Gravity.TOP or Gravity.START
+        )
+        overlayParams.topMargin = 12
+        overlayParams.leftMargin = 12
+        root.addView(overlay, overlayParams)
+        setContentView(root)
     }
 
     private fun copyAssetTree(assetPath: String, destination: File) {
