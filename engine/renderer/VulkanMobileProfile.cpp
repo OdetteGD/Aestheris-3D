@@ -30,7 +30,9 @@ VulkanMobileProfile VulkanMobileProfile::Query(VkPhysicalDevice gpu, VkSurfaceKH
         HasDeviceExtension(gpu, VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME);
     p.synchronization2 = HasDeviceExtension(gpu, VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME);
     p.dynamicRendering = HasDeviceExtension(gpu, VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME);
-    p.astcLdr = HasDeviceExtension(gpu, VK_KHR_FORMAT_FEATURE_FLAGS_2_EXTENSION_NAME);
+    VkFormatProperties astcProps{};
+    vkGetPhysicalDeviceFormatProperties(gpu, VK_FORMAT_ASTC_6x6_UNORM_BLOCK, &astcProps);
+    p.astcLdr = (astcProps.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT) != 0;
     p.externalAhb = HasDeviceExtension(gpu, VK_ANDROID_EXTERNAL_MEMORY_ANDROID_HARDWARE_BUFFER_EXTENSION_NAME);
 
     uint32_t families = 0;
