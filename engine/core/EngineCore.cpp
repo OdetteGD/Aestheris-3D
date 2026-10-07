@@ -143,9 +143,11 @@ EngineCore& EngineCore::Instance() noexcept {
 }
 
 std::unique_ptr<IAetherisRenderer> EngineCore::MakeRenderer(RenderAPI api) {
-    return api == RenderAPI::VULKAN
-        ? std::unique_ptr<IAetherisRenderer>(std::make_unique<VulkanRenderer>(projectRoot_).release())
-        : std::unique_ptr<IAetherisRenderer>(std::make_unique<OpenGLESRenderer>().release());
+    if (api == RenderAPI::VULKAN) {
+        return std::make_unique<VulkanRenderer>(projectRoot_);
+    }
+
+    return std::make_unique<OpenGLESRenderer>();
 }
 
 bool EngineCore::CreateRendererLocked(RenderAPI api, ANativeWindow* window) {
