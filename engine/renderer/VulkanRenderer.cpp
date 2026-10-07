@@ -3932,10 +3932,31 @@ bool VulkanRenderer::UploadImage(
         before.dstQueueFamilyIndex =
             VK_QUEUE_FAMILY_IGNORED;
         before.image = image;
+
+        uint32_t levelCount = 1;
+        uint32_t layerCount = 1;
+
+        for (uint32_t i=0; i<copyCount; ++i) {
+            levelCount =
+                std::max(
+                    levelCount,
+                    copies[i].imageSubresource.mipLevel + 1u
+                );
+
+            layerCount =
+                std::max(
+                    layerCount,
+                    copies[i].imageSubresource.baseArrayLayer +
+                    copies[i].imageSubresource.layerCount
+                );
+        }
+
         before.subresourceRange = {
             VK_IMAGE_ASPECT_COLOR_BIT,
-            0, 1, 0,
-            copyCount == 6 ? 6u : 1u
+            0,
+            levelCount,
+            0,
+            layerCount
         };
 
         vkCmdPipelineBarrier(
