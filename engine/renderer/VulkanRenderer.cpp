@@ -1952,6 +1952,7 @@ void VulkanRenderer::DestroySwapchain() noexcept {
     hdrImage_ = VK_NULL_HANDLE;
     hdrMemory_ = VK_NULL_HANDLE;
 
+    DestroySSAOTarget();
     DestroyGBufferAttachments();
 
     for (VkImageView view : views_)
@@ -2155,6 +2156,7 @@ void VulkanRenderer::Shutdown() noexcept {
         lightingLayout_ = VK_NULL_HANDLE;
         postLayout_ = VK_NULL_HANDLE;
         shadowLayout_ = VK_NULL_HANDLE;
+        ssaoLayout_ = VK_NULL_HANDLE;
 
         const VkDescriptorSetLayout setLayouts[] = {
             materialSetLayout_,
