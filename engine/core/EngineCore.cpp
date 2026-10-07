@@ -12,8 +12,10 @@ void EngineCore::RenderOneFrameLocked() {
     if (!surfaceReady_.load(std::memory_order_acquire) || !activeRenderer_ || frameActive_) return;
     if (!activeRenderer_->BeginFrame()) return;
     frameActive_ = true;
-    static constexpr std::array<RenderItem, 0> kEmptyItems{};
-    activeRenderer_->DrawRenderQueue(RenderQueue(std::span<const RenderItem>(kEmptyItems)));
+    activeRenderer_->DrawRenderQueue(
+        RenderQueue(std::span<const RenderItem>(scene_.renderItems)),
+        std::span<const Transform>(scene_.transforms)
+    );
     activeRenderer_->EndFrame();
     frameActive_ = false;
 }
