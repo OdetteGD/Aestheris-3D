@@ -2805,7 +2805,6 @@ Mat4 VulkanRenderer::MakeLookAt(
     float fy = cy - ey;
     float fz = cz - ez;
 
-    Normalize3:
     {
         const float length =
             std::sqrt(fx * fx + fy * fy + fz * fz);
@@ -2918,6 +2917,188 @@ void VulkanRenderer::UpdateCamera() noexcept {
             projection,
             view
         );
+}
+
+
+bool VulkanRenderer::CreateImageRaw(
+    VkFormat format,
+    VkImageUsageFlags usage,
+    VkImageCreateFlags flags,
+    VkExtent3D imageExtent,
+    uint32_t arrayLayers,
+    VkImage& image,
+    VkDeviceMemory& memory
+) {
+    VkImageCreateInfo info{
+        VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO
+    };
+
+    info.flags = flags;
+    info.imageType = VK_IMAGE_TYPE_2D;
+    info.format = format;
+    info.extent = imageExtent;
+    info.mipLevels = 1;
+    info.arrayLayers = arrayLayers;
+    info.samples = VK_SAMPLE_COUNT_1_BIT;
+    info.tiling = VK_IMAGE_TILING_OPTIMAL;
+    info.usage = usage;
+    info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+    if (vkCreateImage(
+            device_, &info, nullptr, &image) != VK_SUCCESS) {
+        image = VK_NULL_HANDLE;
+        return false;
+    }
+
+    VkMemoryRequirements requirements{};
+    vkGetImageMemoryRequirements(
+        device_, image, &requirements);
+
+    const uint32_t memoryType =
+        FindMemoryType(
+            requirements.memoryTypeBits,
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+        );
+
+    if (memoryType == UINT32_MAX) {
+        vkDestroyImage(device_, image, nullptr);
+        image = VK_NULL_HANDLE;
+        return false;
+    }
+
+    VkMemoryAllocateInfo allocation{
+        VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO
+    };
+
+    allocation.allocationSize = requirements.size;
+    allocation.memoryTypeIndex = memoryType;
+
+    if (vkAllocateMemory(
+            device_, &allocation, nullptr, &memory) != VK_SUCCESS) {
+        vkDestroyImage(device_, image, nullptr);
+        image = VK_NULL_HANDLE;
+        return false;
+    }
+
+    if (vkBindImageMemory(
+            device_, image, memory, 0) != VK_SUCCESS) {
+        vkFreeMemory(device_, memory, nullptr);
+        memory = VK_NULL_HANDLE;
+        vkDestroyImage(device_, image, nullptr);
+        image = VK_NULL_HANDLE;
+        return false;
+    }
+
+    return true;
+}
+
+bool VulkanRenderer::CreateImageViewRaw(
+    VkImage image,
+    VkFormat format,
+    VkImageViewType type,
+    VkImageAspectFlags aspect,
+    uint32_t layers,
+    VkImageView& view
+) {
+    VkImageViewCreateInfo info{
+        VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO
+    };
+
+    info.image = image;
+    info.viewType = type;
+    info.format = format;
+    info.subresourceRange.aspectMask = aspect;
+    info.subresourceRange.baseMipLevel = 0;
+    info.subresourceRange.levelCount = 1;
+    info.subresourceRange.baseArrayLayer = 0;
+    info.subresourceRange.layerCount = layers;
+
+    const VkResult result =
+        vkCreateImageView(
+            device_, &info, nullptr, &view);
+
+    if (result != VK_SUCCESS)
+        view = VK_NULL_HANDLE;
+
+    return result == VK_SUCCESS;
+}
+
+void VulkanRenderer::DestroyPipelines() noexcept {
+    if (!device_) return;
+
+    if (postPipeline_)
+        vkDestroyPipeline(device_, postPipeline_, nullptr);
+
+    if (lightingPipeline_)
+        vkDestroyPipeline(device_, lightingPipeline_, nullptr);
+
+    if (geometryPipeline_)
+        vkDestroyPipeline(device_, geometryPipeline_, nullptr);
+
+    postPipeline_ = VK_NULL_HANDLE;
+    lightingPipeline_ = VK_NULL_HANDLE;
+    geometryPipeline_ = VK_NULL_HANDLE;
+}
+
+void VulkanRenderer::DestroyDescriptors() noexcept {
+    if (!device_) return;
+
+    if (descriptorPool_)
+        vkDestroyDescriptorPool(
+            device_, descriptorPool_, nullptr);
+
+    descriptorPool_ = VK_NULL_HANDLE;
+    lightingInputSet_ = VK_NULL_HANDLE;
+    lightingFrameSet_ = VK_NULL_HANDLE;
+    postSet_ = VK_NULL_HANDLE;
+}
+
+void VulkanRenderer::DestroyDemoMeshes() noexcept {
+    for (MeshGpu& mesh : demoMeshes_) {
+        resources_.DestroyBuffer(mesh.vertex);
+        resources_.DestroyBuffer(mesh.index);
+        mesh.indexCount = 0;
+    }
+}
+
+void VulkanRenderer::DestroyDefaultIBL() noexcept {
+    if (!device_) return;
+
+    if (brdfView_)
+        vkDestroyImageView(device_, brdfView_, nullptr);
+    if (brdfImage_)
+        vkDestroyImage(device_, brdfImage_, nullptr);
+    if (brdfMemory_)
+        vkFreeMemory(device_, brdfMemory_, nullptr);
+
+    if (prefilteredView_)
+        vkDestroyImageView(device_, prefilteredView_, nullptr);
+    if (prefilteredImage_)
+        vkDestroyImage(device_, prefilteredImage_, nullptr);
+    if (prefilteredMemory_)
+        vkFreeMemory(device_, prefilteredMemory_, nullptr);
+
+    if (irradianceView_)
+        vkDestroyImageView(device_, irradianceView_, nullptr);
+    if (irradianceImage_)
+        vkDestroyImage(device_, irradianceImage_, nullptr);
+    if (irradianceMemory_)
+        vkFreeMemory(device_, irradianceMemory_, nullptr);
+
+    if (linearSampler_)
+        vkDestroySampler(device_, linearSampler_, nullptr);
+
+    brdfView_ = VK_NULL_HANDLE;
+    brdfImage_ = VK_NULL_HANDLE;
+    brdfMemory_ = VK_NULL_HANDLE;
+    prefilteredView_ = VK_NULL_HANDLE;
+    prefilteredImage_ = VK_NULL_HANDLE;
+    prefilteredMemory_ = VK_NULL_HANDLE;
+    irradianceView_ = VK_NULL_HANDLE;
+    irradianceImage_ = VK_NULL_HANDLE;
+    irradianceMemory_ = VK_NULL_HANDLE;
+    linearSampler_ = VK_NULL_HANDLE;
 }
 
 } // namespace aetheris
