@@ -2012,33 +2012,14 @@ bool VulkanRenderer::CreateShaderModules() {
 bool VulkanRenderer::CreateDescriptorLayouts() {
     std::array<VkDescriptorSetLayoutBinding,4> materialBindings{};
     materialBindings[0] = {
-        0,
-        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-        1,
-        VK_SHADER_STAGE_FRAGMENT_BIT,
-        nullptr
+        0,VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,1,
+        VK_SHADER_STAGE_FRAGMENT_BIT,nullptr
     };
-    materialBindings[1] = {
-        1,
-        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        1,
-        VK_SHADER_STAGE_FRAGMENT_BIT,
-        nullptr
-    };
-    materialBindings[2] = {
-        2,
-        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        1,
-        VK_SHADER_STAGE_FRAGMENT_BIT,
-        nullptr
-    };
-    materialBindings[3] = {
-        3,
-        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        1,
-        VK_SHADER_STAGE_FRAGMENT_BIT,
-        nullptr
-    };
+    for(uint32_t i=1;i<4;++i)
+        materialBindings[i] = {
+            i,VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,1,
+            VK_SHADER_STAGE_FRAGMENT_BIT,nullptr
+        };
 
     VkDescriptorSetLayoutCreateInfo materialInfo{
         VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO
@@ -2046,139 +2027,111 @@ bool VulkanRenderer::CreateDescriptorLayouts() {
     materialInfo.bindingCount = 4;
     materialInfo.pBindings = materialBindings.data();
 
-    if (vkCreateDescriptorSetLayout(
-            device_, &materialInfo, nullptr, &materialSetLayout_) != VK_SUCCESS)
+    if(vkCreateDescriptorSetLayout(
+            device_,&materialInfo,nullptr,&materialSetLayout_) != VK_SUCCESS)
         return false;
 
     std::array<VkDescriptorSetLayoutBinding,3> inputBindings{};
-    for (uint32_t i=0;i<3;++i) {
+    for(uint32_t i=0;i<3;++i)
         inputBindings[i] = {
-            i,
-            VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT,
-            1,
-            VK_SHADER_STAGE_FRAGMENT_BIT,
-            nullptr
+            i,VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT,1,
+            VK_SHADER_STAGE_FRAGMENT_BIT,nullptr
         };
-    }
 
     VkDescriptorSetLayoutCreateInfo inputInfo{
         VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO
     };
-    inputInfo.bindingCount = 3;
-    inputInfo.pBindings = inputBindings.data();
+    inputInfo.bindingCount=3;
+    inputInfo.pBindings=inputBindings.data();
 
-    if (vkCreateDescriptorSetLayout(
-            device_, &inputInfo, nullptr, &lightingInputLayout_) != VK_SUCCESS)
+    if(vkCreateDescriptorSetLayout(
+            device_,&inputInfo,nullptr,&lightingInputLayout_) != VK_SUCCESS)
         return false;
 
-    // Lighting frame UBO + IBL + shadow atlas.
+    // UBO + irradiance + prefiltered specular + BRDF LUT + CSM + environment HDR.
     std::array<VkDescriptorSetLayoutBinding,6> frameBindings{};
     frameBindings[0] = {
-        0,
-        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
-        1,
-        VK_SHADER_STAGE_FRAGMENT_BIT,
-        nullptr
+        0,VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,1,
+        VK_SHADER_STAGE_FRAGMENT_BIT,nullptr
     };
-
-    for (uint32_t i=1;i<=5;++i) {
+    for(uint32_t i=1;i<6;++i)
         frameBindings[i] = {
-            i,
-            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            1,
-            VK_SHADER_STAGE_FRAGMENT_BIT,
-            nullptr
+            i,VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,1,
+            VK_SHADER_STAGE_FRAGMENT_BIT,nullptr
         };
-    }
 
     VkDescriptorSetLayoutCreateInfo frameInfo{
         VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO
     };
-    frameInfo.bindingCount = 6;
-    frameInfo.pBindings = frameBindings.data();
+    frameInfo.bindingCount=6;
+    frameInfo.pBindings=frameBindings.data();
 
-    if (vkCreateDescriptorSetLayout(
-            device_, &frameInfo, nullptr, &lightingFrameLayout_) != VK_SUCCESS)
+    if(vkCreateDescriptorSetLayout(
+            device_,&frameInfo,nullptr,&lightingFrameLayout_) != VK_SUCCESS)
         return false;
 
+    // SSAO: two sampled neighboring-pixel resources plus persistent frame UBO.
     std::array<VkDescriptorSetLayoutBinding,3> ssaoBindings{};
     ssaoBindings[0] = {
-        0,
-        VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT,
-        1,
-        VK_SHADER_STAGE_FRAGMENT_BIT,
-        nullptr
+        0,VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,1,
+        VK_SHADER_STAGE_FRAGMENT_BIT,nullptr
     };
     ssaoBindings[1] = {
-        1,
-        VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT,
-        1,
-        VK_SHADER_STAGE_FRAGMENT_BIT,
-        nullptr
+        1,VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,1,
+        VK_SHADER_STAGE_FRAGMENT_BIT,nullptr
     };
     ssaoBindings[2] = {
-        2,
-        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
-        1,
-        VK_SHADER_STAGE_FRAGMENT_BIT,
-        nullptr
+        2,VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,1,
+        VK_SHADER_STAGE_FRAGMENT_BIT,nullptr
     };
 
     VkDescriptorSetLayoutCreateInfo ssaoInfo{
         VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO
     };
-    ssaoInfo.bindingCount = 3;
-    ssaoInfo.pBindings = ssaoBindings.data();
+    ssaoInfo.bindingCount=3;
+    ssaoInfo.pBindings=ssaoBindings.data();
 
-    if (vkCreateDescriptorSetLayout(
-            device_, &ssaoInfo, nullptr, &ssaoSetLayout_) != VK_SUCCESS)
+    if(vkCreateDescriptorSetLayout(
+            device_,&ssaoInfo,nullptr,&ssaoSetLayout_) != VK_SUCCESS)
         return false;
 
     std::array<VkDescriptorSetLayoutBinding,2> postBindings{};
     postBindings[0] = {
-        0,
-        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        1,
-        VK_SHADER_STAGE_FRAGMENT_BIT,
-        nullptr
+        0,VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,1,
+        VK_SHADER_STAGE_FRAGMENT_BIT,nullptr
     };
     postBindings[1] = {
-        1,
-        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        1,
-        VK_SHADER_STAGE_FRAGMENT_BIT,
-        nullptr
+        1,VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,1,
+        VK_SHADER_STAGE_FRAGMENT_BIT,nullptr
     };
 
     VkDescriptorSetLayoutCreateInfo postInfo{
         VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO
     };
-    postInfo.bindingCount = 2;
-    postInfo.pBindings = postBindings.data();
+    postInfo.bindingCount=2;
+    postInfo.pBindings=postBindings.data();
 
-    if (vkCreateDescriptorSetLayout(
-            device_, &postInfo, nullptr, &postSetLayout_) != VK_SUCCESS)
+    if(vkCreateDescriptorSetLayout(
+            device_,&postInfo,nullptr,&postSetLayout_) != VK_SUCCESS)
         return false;
 
     VkPushConstantRange geometryPush{
-        VK_SHADER_STAGE_VERTEX_BIT,
-        0,
-        128
+        VK_SHADER_STAGE_VERTEX_BIT,0,128
     };
 
     VkPipelineLayoutCreateInfo geometryLayoutInfo{
         VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO
     };
-    geometryLayoutInfo.setLayoutCount = 1;
-    geometryLayoutInfo.pSetLayouts = &materialSetLayout_;
-    geometryLayoutInfo.pushConstantRangeCount = 1;
-    geometryLayoutInfo.pPushConstantRanges = &geometryPush;
+    geometryLayoutInfo.setLayoutCount=1;
+    geometryLayoutInfo.pSetLayouts=&materialSetLayout_;
+    geometryLayoutInfo.pushConstantRangeCount=1;
+    geometryLayoutInfo.pPushConstantRanges=&geometryPush;
 
-    if (vkCreatePipelineLayout(
-            device_, &geometryLayoutInfo, nullptr, &geometryLayout_) != VK_SUCCESS)
+    if(vkCreatePipelineLayout(
+            device_,&geometryLayoutInfo,nullptr,&geometryLayout_) != VK_SUCCESS)
         return false;
 
-    const VkDescriptorSetLayout lightingLayouts[2] = {
+    const VkDescriptorSetLayout lightingLayouts[2]={
         lightingInputLayout_,
         lightingFrameLayout_
     };
@@ -2186,56 +2139,48 @@ bool VulkanRenderer::CreateDescriptorLayouts() {
     VkPipelineLayoutCreateInfo lightingLayoutInfo{
         VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO
     };
-    lightingLayoutInfo.setLayoutCount = 2;
-    lightingLayoutInfo.pSetLayouts = lightingLayouts;
+    lightingLayoutInfo.setLayoutCount=2;
+    lightingLayoutInfo.pSetLayouts=lightingLayouts;
 
-    if (vkCreatePipelineLayout(
-            device_, &lightingLayoutInfo, nullptr, &lightingLayout_) != VK_SUCCESS)
+    if(vkCreatePipelineLayout(
+            device_,&lightingLayoutInfo,nullptr,&lightingLayout_) != VK_SUCCESS)
         return false;
-
-    const VkDescriptorSetLayout ssaoLayouts[1] = {
-        ssaoSetLayout_
-    };
 
     VkPipelineLayoutCreateInfo ssaoLayoutInfo{
         VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO
     };
-    ssaoLayoutInfo.setLayoutCount = 1;
-    ssaoLayoutInfo.pSetLayouts = ssaoLayouts;
+    ssaoLayoutInfo.setLayoutCount=1;
+    ssaoLayoutInfo.pSetLayouts=&ssaoSetLayout_;
 
-    if (vkCreatePipelineLayout(
-            device_, &ssaoLayoutInfo, nullptr, &ssaoLayout_) != VK_SUCCESS)
+    if(vkCreatePipelineLayout(
+            device_,&ssaoLayoutInfo,nullptr,&ssaoLayout_) != VK_SUCCESS)
         return false;
 
     VkPushConstantRange shadowPush{
-        VK_SHADER_STAGE_VERTEX_BIT,
-        0,
-        128
+        VK_SHADER_STAGE_VERTEX_BIT,0,128
     };
 
     VkPipelineLayoutCreateInfo shadowLayoutInfo{
         VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO
     };
-    shadowLayoutInfo.pushConstantRangeCount = 1;
-    shadowLayoutInfo.pPushConstantRanges = &shadowPush;
+    shadowLayoutInfo.pushConstantRangeCount=1;
+    shadowLayoutInfo.pPushConstantRanges=&shadowPush;
 
-    if (vkCreatePipelineLayout(
-            device_, &shadowLayoutInfo, nullptr, &shadowLayout_) != VK_SUCCESS)
+    if(vkCreatePipelineLayout(
+            device_,&shadowLayoutInfo,nullptr,&shadowLayout_) != VK_SUCCESS)
         return false;
 
     VkPushConstantRange postPush{
-        VK_SHADER_STAGE_FRAGMENT_BIT,
-        0,
-        16
+        VK_SHADER_STAGE_FRAGMENT_BIT,0,16
     };
 
     VkPipelineLayoutCreateInfo postLayoutInfo{
         VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO
     };
-    postLayoutInfo.setLayoutCount = 1;
-    postLayoutInfo.pSetLayouts = &postSetLayout_;
-    postLayoutInfo.pushConstantRangeCount = 1;
-    postLayoutInfo.pPushConstantRanges = &postPush;
+    postLayoutInfo.setLayoutCount=1;
+    postLayoutInfo.pSetLayouts=&postSetLayout_;
+    postLayoutInfo.pushConstantRangeCount=1;
+    postLayoutInfo.pPushConstantRanges=&postPush;
 
     return vkCreatePipelineLayout(
         device_,
