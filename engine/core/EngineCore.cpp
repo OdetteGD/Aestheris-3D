@@ -147,6 +147,11 @@ void EngineCore::OnSurfaceChanged(ANativeWindow* w) {
     surfaceReady_.store(false, std::memory_order_release);
 
     if (!activeRenderer_) {
+        if (!demoWorldInitialized_) {
+            demoWorldInitialized_ =
+                demoWorld_.Initialize(projectRoot_, scene_);
+        }
+
         // SurfaceView.surfaceCreated is the first legal point at which the native
         // Android window exists. Create the renderer only from this callback.
         if (!CreateRendererLocked(RenderAPI::VULKAN, w)) {
@@ -212,6 +217,9 @@ void EngineCore::Shutdown() noexcept {
         activeRenderer_->Shutdown();
         activeRenderer_.reset();
     }
+    demoWorldInitialized_ = false;
+    scene_.renderItems.clear();
+    scene_.transforms.clear();
     AETHERIS_LOGI("Engine shutdown complete");
 }
 
