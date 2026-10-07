@@ -74,6 +74,7 @@ bool VulkanRenderer::Initialize(ANativeWindow* w) {
         !CreateSwapchain() ||
         !CreateGBufferAttachments() ||
         !CreateHDRTarget() ||
+        !CreateSSAOTarget() ||
         !CreateBloomResources() ||
         !CreatePasses() ||
         !CreateViews() ||
@@ -361,22 +362,6 @@ bool VulkanRenderer::CreateGBufferAttachments(){
             depthMemory_,
             depthView_,
             VK_IMAGE_ASPECT_DEPTH_BIT)) {
-        DestroyGBufferAttachments();
-        return false;
-    }
-
-    const VkImageUsageFlags ssaoUsage =
-        VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT |
-        VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
-        VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT;
-
-    if (!CreateAttachmentImage(
-            ssaoFormat_,
-            ssaoUsage,
-            ssaoImage_,
-            ssaoMemory_,
-            ssaoView_,
-            VK_IMAGE_ASPECT_COLOR_BIT)) {
         DestroyGBufferAttachments();
         return false;
     }
