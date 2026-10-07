@@ -695,11 +695,12 @@ bool VulkanRenderer::CreateFramebuffers() {
     postFramebuffers_.resize(views_.size());
 
     for (size_t i = 0; i < views_.size(); ++i) {
-        const std::array<VkImageView, 5> attachments = {
+        const std::array<VkImageView, 6> attachments = {
             gbufferViews_[0],
             gbufferViews_[1],
             gbufferViews_[2],
             depthView_,
+            ssaoView_,
             hdrView_
         };
 
@@ -707,7 +708,7 @@ bool VulkanRenderer::CreateFramebuffers() {
             VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO
         };
         mainInfo.renderPass = pass_;
-        mainInfo.attachmentCount = 5;
+        mainInfo.attachmentCount = 6;
         mainInfo.pAttachments = attachments.data();
         mainInfo.width = extent_.width;
         mainInfo.height = extent_.height;
@@ -1967,8 +1968,7 @@ bool VulkanRenderer::CreateShaderModules() {
 }
 
 bool VulkanRenderer::CreateDescriptorLayouts() {
-    std::array<VkDescriptorSetLayoutBinding, 4> materialBindings{};
-
+    std::array<VkDescriptorSetLayoutBinding,4> materialBindings{};
     materialBindings[0] = {
         0,
         VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
@@ -1976,41 +1976,40 @@ bool VulkanRenderer::CreateDescriptorLayouts() {
         VK_SHADER_STAGE_FRAGMENT_BIT,
         nullptr
     };
-
-    for (uint32_t i = 1; i < 4; ++i) {
-        materialBindings[i] = {
-            i,
-            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            1,
-            VK_SHADER_STAGE_FRAGMENT_BIT,
-            nullptr
-        };
-    }
+    materialBindings[1] = {
+        1,
+        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        1,
+        VK_SHADER_STAGE_FRAGMENT_BIT,
+        nullptr
+    };
+    materialBindings[2] = {
+        2,
+        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        1,
+        VK_SHADER_STAGE_FRAGMENT_BIT,
+        nullptr
+    };
+    materialBindings[3] = {
+        3,
+        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        1,
+        VK_SHADER_STAGE_FRAGMENT_BIT,
+        nullptr
+    };
 
     VkDescriptorSetLayoutCreateInfo materialInfo{
         VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO
     };
-
-    materialInfo.bindingCount =
-        static_cast<uint32_t>(
-            materialBindings.size()
-        );
-
-    materialInfo.pBindings =
-        materialBindings.data();
+    materialInfo.bindingCount = 4;
+    materialInfo.pBindings = materialBindings.data();
 
     if (vkCreateDescriptorSetLayout(
-            device_,
-            &materialInfo,
-            nullptr,
-            &materialSetLayout_
-        ) != VK_SUCCESS) {
+            device_, &materialInfo, nullptr, &materialSetLayout_) != VK_SUCCESS)
         return false;
-    }
 
-    std::array<VkDescriptorSetLayoutBinding, 3> inputBindings{};
-
-    for (uint32_t i = 0; i < 3; ++i) {
+    std::array<VkDescriptorSetLayoutBinding,3> inputBindings{};
+    for (uint32_t i=0;i<3;++i) {
         inputBindings[i] = {
             i,
             VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT,
@@ -2023,21 +2022,15 @@ bool VulkanRenderer::CreateDescriptorLayouts() {
     VkDescriptorSetLayoutCreateInfo inputInfo{
         VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO
     };
-
     inputInfo.bindingCount = 3;
     inputInfo.pBindings = inputBindings.data();
 
     if (vkCreateDescriptorSetLayout(
-            device_,
-            &inputInfo,
-            nullptr,
-            &lightingInputLayout_
-        ) != VK_SUCCESS) {
+            device_, &inputInfo, nullptr, &lightingInputLayout_) != VK_SUCCESS)
         return false;
-    }
 
-    std::array<VkDescriptorSetLayoutBinding, 5> frameBindings{};
-
+    // Lighting frame UBO + IBL + shadow atlas.
+    std::array<VkDescriptorSetLayoutBinding,6> frameBindings{};
     frameBindings[0] = {
         0,
         VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
@@ -2046,7 +2039,7 @@ bool VulkanRenderer::CreateDescriptorLayouts() {
         nullptr
     };
 
-    for (uint32_t i = 1; i < 4; ++i) {
+    for (uint32_t i=1;i<=5;++i) {
         frameBindings[i] = {
             i,
             VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
@@ -2056,67 +2049,74 @@ bool VulkanRenderer::CreateDescriptorLayouts() {
         };
     }
 
-    frameBindings[4] = {
-        4,
+    VkDescriptorSetLayoutCreateInfo frameInfo{
+        VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO
+    };
+    frameInfo.bindingCount = 6;
+    frameInfo.pBindings = frameBindings.data();
+
+    if (vkCreateDescriptorSetLayout(
+            device_, &frameInfo, nullptr, &lightingFrameLayout_) != VK_SUCCESS)
+        return false;
+
+    std::array<VkDescriptorSetLayoutBinding,3> ssaoBindings{};
+    ssaoBindings[0] = {
+        0,
+        VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT,
+        1,
+        VK_SHADER_STAGE_FRAGMENT_BIT,
+        nullptr
+    };
+    ssaoBindings[1] = {
+        1,
+        VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT,
+        1,
+        VK_SHADER_STAGE_FRAGMENT_BIT,
+        nullptr
+    };
+    ssaoBindings[2] = {
+        2,
+        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
+        1,
+        VK_SHADER_STAGE_FRAGMENT_BIT,
+        nullptr
+    };
+
+    VkDescriptorSetLayoutCreateInfo ssaoInfo{
+        VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO
+    };
+    ssaoInfo.bindingCount = 3;
+    ssaoInfo.pBindings = ssaoBindings.data();
+
+    if (vkCreateDescriptorSetLayout(
+            device_, &ssaoInfo, nullptr, &ssaoSetLayout_) != VK_SUCCESS)
+        return false;
+
+    std::array<VkDescriptorSetLayoutBinding,2> postBindings{};
+    postBindings[0] = {
+        0,
+        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        1,
+        VK_SHADER_STAGE_FRAGMENT_BIT,
+        nullptr
+    };
+    postBindings[1] = {
+        1,
         VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
         1,
         VK_SHADER_STAGE_FRAGMENT_BIT,
         nullptr
     };
 
-    VkDescriptorSetLayoutCreateInfo frameInfo{
-        VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO
-    };
-
-    frameInfo.bindingCount =
-        static_cast<uint32_t>(
-            frameBindings.size()
-        );
-
-    frameInfo.pBindings =
-        frameBindings.data();
-
-    if (vkCreateDescriptorSetLayout(
-            device_,
-            &frameInfo,
-            nullptr,
-            &lightingFrameLayout_
-        ) != VK_SUCCESS) {
-        return false;
-    }
-
-    std::array<VkDescriptorSetLayoutBinding, 2> postBindings{{
-        {
-            0,
-            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            1,
-            VK_SHADER_STAGE_FRAGMENT_BIT,
-            nullptr
-        },
-        {
-            1,
-            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            1,
-            VK_SHADER_STAGE_FRAGMENT_BIT,
-            nullptr
-        }
-    }};
-
     VkDescriptorSetLayoutCreateInfo postInfo{
         VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO
     };
-
     postInfo.bindingCount = 2;
     postInfo.pBindings = postBindings.data();
 
     if (vkCreateDescriptorSetLayout(
-            device_,
-            &postInfo,
-            nullptr,
-            &postSetLayout_
-        ) != VK_SUCCESS) {
+            device_, &postInfo, nullptr, &postSetLayout_) != VK_SUCCESS)
         return false;
-    }
 
     VkPushConstantRange geometryPush{
         VK_SHADER_STAGE_VERTEX_BIT,
@@ -2127,27 +2127,16 @@ bool VulkanRenderer::CreateDescriptorLayouts() {
     VkPipelineLayoutCreateInfo geometryLayoutInfo{
         VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO
     };
-
     geometryLayoutInfo.setLayoutCount = 1;
-    geometryLayoutInfo.pSetLayouts =
-        &materialSetLayout_;
-
-    geometryLayoutInfo.pushConstantRangeCount =
-        1;
-
-    geometryLayoutInfo.pPushConstantRanges =
-        &geometryPush;
+    geometryLayoutInfo.pSetLayouts = &materialSetLayout_;
+    geometryLayoutInfo.pushConstantRangeCount = 1;
+    geometryLayoutInfo.pPushConstantRanges = &geometryPush;
 
     if (vkCreatePipelineLayout(
-            device_,
-            &geometryLayoutInfo,
-            nullptr,
-            &geometryLayout_
-        ) != VK_SUCCESS) {
+            device_, &geometryLayoutInfo, nullptr, &geometryLayout_) != VK_SUCCESS)
         return false;
-    }
 
-    const std::array<VkDescriptorSetLayout, 2> lightingLayouts = {
+    const VkDescriptorSetLayout lightingLayouts[2] = {
         lightingInputLayout_,
         lightingFrameLayout_
     };
@@ -2155,19 +2144,26 @@ bool VulkanRenderer::CreateDescriptorLayouts() {
     VkPipelineLayoutCreateInfo lightingLayoutInfo{
         VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO
     };
-
     lightingLayoutInfo.setLayoutCount = 2;
-    lightingLayoutInfo.pSetLayouts =
-        lightingLayouts.data();
+    lightingLayoutInfo.pSetLayouts = lightingLayouts;
 
     if (vkCreatePipelineLayout(
-            device_,
-            &lightingLayoutInfo,
-            nullptr,
-            &lightingLayout_
-        ) != VK_SUCCESS) {
+            device_, &lightingLayoutInfo, nullptr, &lightingLayout_) != VK_SUCCESS)
         return false;
-    }
+
+    const VkDescriptorSetLayout ssaoLayouts[1] = {
+        ssaoSetLayout_
+    };
+
+    VkPipelineLayoutCreateInfo ssaoLayoutInfo{
+        VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO
+    };
+    ssaoLayoutInfo.setLayoutCount = 1;
+    ssaoLayoutInfo.pSetLayouts = ssaoLayouts;
+
+    if (vkCreatePipelineLayout(
+            device_, &ssaoLayoutInfo, nullptr, &ssaoLayout_) != VK_SUCCESS)
+        return false;
 
     VkPushConstantRange shadowPush{
         VK_SHADER_STAGE_VERTEX_BIT,
@@ -2178,19 +2174,12 @@ bool VulkanRenderer::CreateDescriptorLayouts() {
     VkPipelineLayoutCreateInfo shadowLayoutInfo{
         VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO
     };
-
     shadowLayoutInfo.pushConstantRangeCount = 1;
-    shadowLayoutInfo.pPushConstantRanges =
-        &shadowPush;
+    shadowLayoutInfo.pPushConstantRanges = &shadowPush;
 
     if (vkCreatePipelineLayout(
-            device_,
-            &shadowLayoutInfo,
-            nullptr,
-            &shadowLayout_
-        ) != VK_SUCCESS) {
+            device_, &shadowLayoutInfo, nullptr, &shadowLayout_) != VK_SUCCESS)
         return false;
-    }
 
     VkPushConstantRange postPush{
         VK_SHADER_STAGE_FRAGMENT_BIT,
@@ -2201,14 +2190,10 @@ bool VulkanRenderer::CreateDescriptorLayouts() {
     VkPipelineLayoutCreateInfo postLayoutInfo{
         VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO
     };
-
     postLayoutInfo.setLayoutCount = 1;
-    postLayoutInfo.pSetLayouts =
-        &postSetLayout_;
-
+    postLayoutInfo.pSetLayouts = &postSetLayout_;
     postLayoutInfo.pushConstantRangeCount = 1;
-    postLayoutInfo.pPushConstantRanges =
-        &postPush;
+    postLayoutInfo.pPushConstantRanges = &postPush;
 
     return vkCreatePipelineLayout(
         device_,
@@ -2958,7 +2943,7 @@ bool VulkanRenderer::CreatePipelines() {
     lightingInfo.renderPass =
         pass_;
     lightingInfo.subpass =
-        1;
+        2;
 
     if (vkCreateGraphicsPipelines(
             device_,
