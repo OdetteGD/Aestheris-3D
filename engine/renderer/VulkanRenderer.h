@@ -308,7 +308,6 @@ class VulkanRenderer final : public IAetherisRenderer {
     void DestroyOneTimeCommand(VkCommandBuffer commandBuffer) noexcept;
 
     bool UpdateFrameUniforms() noexcept;
-    bool UpdateCSMUniforms() noexcept;
     void UpdateCamera() noexcept;
 
     static Mat4 Identity() noexcept;
@@ -332,9 +331,6 @@ class VulkanRenderer final : public IAetherisRenderer {
     ) noexcept;
 
     bool RecordShadowMaps(const RenderQueue& queue, std::span<const Transform> transforms) noexcept;
-    bool RecordGeometry(const RenderQueue& queue, std::span<const Transform> transforms);
-    bool RecordLighting();
-    bool RecordPost();
 
     void DestroyPipelines() noexcept;
     void DestroyDescriptors() noexcept;
