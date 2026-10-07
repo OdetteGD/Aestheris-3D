@@ -2,7 +2,6 @@
 #include <android/native_window.h>
 #include <EGL/eglext.h>
 #include <GLES3/gl3.h>
-#include <algorithm>
 
 namespace aetheris {
 
@@ -31,6 +30,12 @@ bool OpenGLESRenderer::CreateContext() {
     EGLint major = 0;
     EGLint minor = 0;
     if (eglInitialize(display_, &major, &minor) != EGL_TRUE) {
+        display_ = EGL_NO_DISPLAY;
+        return false;
+    }
+
+    if (eglBindAPI(EGL_OPENGL_ES_API) != EGL_TRUE) {
+        eglTerminate(display_);
         display_ = EGL_NO_DISPLAY;
         return false;
     }
