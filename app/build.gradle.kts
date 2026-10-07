@@ -36,7 +36,7 @@ android {
         cmake { path = file("../CMakeLists.txt"); version = "3.22.1" }
     }
     sourceSets {
-        getByName("main") { java.srcDirs("../../android") }
+        getByName("main") { java.srcDirs("../android") }
     }
     packaging { jniLibs { useLegacyPackaging = false } }
 }
