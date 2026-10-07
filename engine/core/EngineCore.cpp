@@ -50,29 +50,45 @@ void EngineCore::LogFatalBootFailureLocked(const char* stage, const char* reason
 }
 
 void EngineCore::RenderOneFrameLocked() {
-    if (!activeRenderer_ || state_ == EngineState::Uninitialized || frameActive_)
+    if (!activeRenderer_ ||
+        state_ == EngineState::Uninitialized ||
+        frameActive_ ||
+        !surfaceReady_.load(
+            std::memory_order_acquire
+        )) {
         return;
+    }
 
     if (state_ == EngineState::SurfaceReady) {
-        if (!activeRenderer_->BeginFrame()) return;
+        // The renderer owns the safe-present path while deferred resources are
+        // absent. No geometry, SSAO, IBL, or post graph is reachable here.
+        if (!activeRenderer_->BeginFrame())
+            return;
+
         frameActive_ = true;
-        static constexpr std::array<RenderItem,0> emptyItems{};
-        activeRenderer_->DrawRenderQueue(
-            RenderQueue(std::span<const RenderItem>(emptyItems)),
-            std::span<const Transform>(scene_.transforms)
-        );
         activeRenderer_->EndFrame();
         frameActive_ = false;
+
         firstSurfaceFramePresented_ = true;
+
         if (!assetBootFailed_) {
-            state_ = EngineState::AllocatingAssets;
-            assetBootStart_ = std::chrono::steady_clock::now();
+            state_ =
+                EngineState::AllocatingAssets;
+            assetBootStart_ =
+                std::chrono::steady_clock::now();
         }
+
         return;
     }
 
     if (state_ == EngineState::AllocatingAssets) {
-        const auto start = std::chrono::steady_clock::now();
+        const auto start =
+            std::chrono::steady_clock::now();
+
+        if (!surfaceReady_.load(
+                std::memory_order_acquire)) {
+            return;
+        }
 
         if (!demoWorldInitialized_) {
             demoWorldInitialized_ =
@@ -82,23 +98,49 @@ void EngineCore::RenderOneFrameLocked() {
                 );
         }
 
+        if (!surfaceReady_.load(
+                std::memory_order_acquire)) {
+            return;
+        }
+
         const bool ok =
             demoWorldInitialized_ &&
             activeRenderer_->EnsureDeferredResources();
-        const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::steady_clock::now() - start
-        );
 
-        if (ok && elapsed <= kDeferredBootBudget) {
-            state_ = EngineState::Rendering;
+        const auto elapsed =
+            std::chrono::duration_cast<
+                std::chrono::milliseconds
+            >(
+                std::chrono::steady_clock::now() -
+                start
+            );
+
+        if (!surfaceReady_.load(
+                std::memory_order_acquire)) {
+            activeRenderer_->AbortDeferredResources();
+            return;
+        }
+
+        if (ok &&
+            elapsed <= kDeferredBootBudget) {
+            state_ =
+                EngineState::Rendering;
+
             AETHERIS_LOGI(
                 "Engine state AllocatingAssets -> Rendering; boot=%lld ms",
-                static_cast<long long>(elapsed.count())
+                static_cast<long long>(
+                    elapsed.count()
+                )
             );
         } else {
-            assetBootFailed_ = true;
+            assetBootFailed_ =
+                true;
+
             activeRenderer_->AbortDeferredResources();
-            state_ = EngineState::SurfaceReady;
+
+            state_ =
+                EngineState::SurfaceReady;
+
             LogFatalBootFailureLocked(
                 elapsed > kDeferredBootBudget
                     ? "asset_timeout"
@@ -108,18 +150,29 @@ void EngineCore::RenderOneFrameLocked() {
                     : "deferred Vulkan resource boot failed"
             );
         }
+
         return;
     }
 
     if (state_ != EngineState::Rendering)
         return;
 
-    if (!activeRenderer_->BeginFrame()) return;
+    if (!activeRenderer_->BeginFrame())
+        return;
+
     frameActive_ = true;
+
     activeRenderer_->DrawRenderQueue(
-        RenderQueue(std::span<const RenderItem>(scene_.renderItems)),
-        std::span<const Transform>(scene_.transforms)
+        RenderQueue(
+            std::span<const RenderItem>(
+                scene_.renderItems
+            )
+        ),
+        std::span<const Transform>(
+            scene_.transforms
+        )
     );
+
     activeRenderer_->EndFrame();
     frameActive_ = false;
 }
@@ -138,6 +191,7 @@ void EngineCore::RenderLoop() noexcept {
 void EngineCore::StartRenderLoopLocked() {
     if (renderThread_.joinable()) return;
     renderStop_.store(false, std::memory_order_release);
+    surfaceReady_.store(true, std::memory_order_release);
     renderThread_ = std::thread([this] { RenderLoop(); });
 }
 
@@ -173,15 +227,33 @@ bool EngineCore::CreateRendererLocked(RenderAPI api, ANativeWindow* window) {
     return true;
 }
 
-bool EngineCore::Initialize(RenderAPI api, ANativeWindow* window) {
+bool EngineCore::Initialize(
+    RenderAPI api,
+    ANativeWindow* window
+) {
     std::scoped_lock lock(mutex_);
+
     if (activeRenderer_)
         return state_ != EngineState::Uninitialized;
-    if (!CreateRendererLocked(api, window))
+
+    if (!CreateRendererLocked(
+            api,
+            window
+        )) {
         return false;
-    state_ = EngineState::SurfaceReady;
+    }
+
+    state_ =
+        EngineState::SurfaceReady;
+
+    surfaceReady_.store(
+        true,
+        std::memory_order_release
+    );
+
     firstSurfaceFramePresented_ = false;
     assetBootFailed_ = false;
+
     StartRenderLoopLocked();
     return true;
 }
@@ -263,14 +335,38 @@ void EngineCore::SetProjectRoot(const std::filesystem::path& root) {
     projectRoot_ = root;
 }
 
-void EngineCore::OnSurfaceChanged(ANativeWindow* window) {
+void EngineCore::OnSurfaceChanged(
+    ANativeWindow* window
+) {
+    if (!window)
+        return;
+
+    surfaceReady_.store(
+        false,
+        std::memory_order_release
+    );
+
     std::scoped_lock lock(mutex_);
-    if (!window || frameActive_) return;
+
+    if (activeRenderer_ &&
+        state_ == EngineState::AllocatingAssets) {
+        AETHERIS_LOGI(
+            "Surface change deferred until current boot transaction completes"
+        );
+    }
 
     if (!activeRenderer_) {
-        if (!CreateRendererLocked(RenderAPI::VULKAN, window) &&
-            !CreateRendererLocked(RenderAPI::OPENGL_ES3, window)) {
-            state_ = EngineState::Uninitialized;
+        if (!CreateRendererLocked(
+                RenderAPI::VULKAN,
+                window
+            ) &&
+            !CreateRendererLocked(
+                RenderAPI::OPENGL_ES3,
+                window
+            )) {
+            state_ =
+                EngineState::Uninitialized;
+
             LogFatalBootFailureLocked(
                 "surface_boot",
                 "device or swapchain bootstrap failed for the supplied ANativeWindow"
@@ -278,16 +374,33 @@ void EngineCore::OnSurfaceChanged(ANativeWindow* window) {
             return;
         }
 
-        state_ = EngineState::SurfaceReady;
+        state_ =
+            EngineState::SurfaceReady;
+
+        surfaceReady_.store(
+            true,
+            std::memory_order_release
+        );
+
         firstSurfaceFramePresented_ = false;
         assetBootFailed_ = false;
+
         StartRenderLoopLocked();
         return;
     }
 
-    const bool ok = activeRenderer_->RecreateSwapchain(window);
+    // Android can report surfaceChanged while the same native surface remains
+    // valid. Rebuilding the swapchain is serialized here, never from the frame
+    // body itself.
+    const bool ok =
+        activeRenderer_->RecreateSwapchain(
+            window
+        );
+
     if (!ok) {
-        state_ = EngineState::Uninitialized;
+        state_ =
+            EngineState::Uninitialized;
+
         LogFatalBootFailureLocked(
             "surface_recreate",
             "swapchain or safe presentation rebuild failed"
@@ -295,20 +408,53 @@ void EngineCore::OnSurfaceChanged(ANativeWindow* window) {
         return;
     }
 
-    state_ = EngineState::SurfaceReady;
+    state_ =
+        EngineState::SurfaceReady;
+
+    surfaceReady_.store(
+        true,
+        std::memory_order_release
+    );
+
     firstSurfaceFramePresented_ = false;
     assetBootFailed_ = false;
+    demoWorldInitialized_ = false;
+
     StartRenderLoopLocked();
 }
 
 void EngineCore::OnSurfaceDestroyed() noexcept {
-    StopRenderLoop();
+    // Publish the loss before waiting on the render thread. The frame thread
+    // immediately stops touching Vulkan surface-dependent state.
+    surfaceReady_.store(
+        false,
+        std::memory_order_release
+    );
+
+    renderStop_.store(
+        true,
+        std::memory_order_release
+    );
+
+    if (renderThread_.joinable()) {
+        if (renderThread_.get_id() ==
+            std::this_thread::get_id()) {
+            renderThread_.detach();
+        } else {
+            renderThread_.join();
+        }
+    }
+
     std::scoped_lock lock(mutex_);
+
     frameActive_ = false;
-    state_ = EngineState::Uninitialized;
+    state_ =
+        EngineState::Uninitialized;
     firstSurfaceFramePresented_ = false;
     assetBootFailed_ = false;
-    if (activeRenderer_) activeRenderer_->ReleaseSurface();
+
+    if (activeRenderer_)
+        activeRenderer_->ReleaseSurface();
 }
 
 void EngineCore::ApplyGizmo(const GizmoCommand& c) {
@@ -333,16 +479,26 @@ void EngineCore::ApplyGizmo(const GizmoCommand& c) {
 }
 
 void EngineCore::Shutdown() noexcept {
+    surfaceReady_.store(
+        false,
+        std::memory_order_release
+    );
+
     StopRenderLoop();
+
     std::scoped_lock lock(mutex_);
+
     frameActive_ = false;
-    state_ = EngineState::Uninitialized;
+    state_ =
+        EngineState::Uninitialized;
     firstSurfaceFramePresented_ = false;
     assetBootFailed_ = false;
+
     if (activeRenderer_) {
         activeRenderer_->Shutdown();
         activeRenderer_.reset();
     }
+
     demoWorldInitialized_ = false;
     scene_.renderItems.clear();
     scene_.transforms.clear();
