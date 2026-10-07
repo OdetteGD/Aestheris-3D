@@ -56,8 +56,21 @@ class VulkanRenderer final : public IAetherisRenderer {
     VkDeviceMemory hdrMemory_{};
     VkFormat hdrFormat_{VK_FORMAT_R16G16B16A16_SFLOAT};
 
+    VkImage ssaoImage_{};
+    VkImageView ssaoView_{};
+    VkDeviceMemory ssaoMemory_{};
+    VkFormat ssaoFormat_{VK_FORMAT_R8_UNORM};
+
+    VkImage environmentImage_{};
+    VkImageView environmentView_{};
+    VkDeviceMemory environmentMemory_{};
+    uint32_t environmentWidth_{};
+    uint32_t environmentHeight_{};
+    uint32_t environmentMipLevels_{1};
+
     VkRenderPass pass_{};
     VkRenderPass postPass_{};
+    VkRenderPass ssaoPass_{};
     VkRenderPass bloomDownPass_{};
     VkRenderPass bloomUpPass_{};
 
@@ -84,6 +97,7 @@ class VulkanRenderer final : public IAetherisRenderer {
     VkShaderModule postFrag_{};
     VkShaderModule shadowVert_{};
     VkShaderModule shadowFrag_{};
+    VkShaderModule ssaoFrag_{};
     VkShaderModule bloomDownVert_{};
     VkShaderModule bloomUpVert_{};
     VkShaderModule bloomDownFrag_{};
@@ -93,11 +107,13 @@ class VulkanRenderer final : public IAetherisRenderer {
     VkPipelineLayout lightingLayout_{};
     VkPipelineLayout postLayout_{};
     VkPipelineLayout shadowLayout_{};
+    VkPipelineLayout ssaoLayout_{};
 
     VkPipeline geometryPipeline_{};
     VkPipeline lightingPipeline_{};
     VkPipeline postPipeline_{};
     VkPipeline shadowPipeline_{};
+    VkPipeline ssaoPipeline_{};
     VkPipeline bloomDownPipeline_{};
     VkPipeline bloomUpPipeline_{};
 
@@ -106,6 +122,7 @@ class VulkanRenderer final : public IAetherisRenderer {
     VkDescriptorSetLayout postSetLayout_{};
     VkDescriptorSetLayout materialSetLayout_{};
     VkDescriptorSetLayout shadowSetLayout_{};
+    VkDescriptorSetLayout ssaoSetLayout_{};
     VkDescriptorPool descriptorPool_{};
 
     VkDescriptorSet lightingInputSet_{};
@@ -115,6 +132,7 @@ class VulkanRenderer final : public IAetherisRenderer {
     VkDescriptorSet bloomUpSet_{};
     std::array<VkDescriptorSet, kMaxDemoMeshes> materialSets_{};
     VkDescriptorSet shadowSet_{};
+    VkDescriptorSet ssaoSet_{};
 
     VkSampler linearSampler_{};
 
@@ -198,7 +216,9 @@ class VulkanRenderer final : public IAetherisRenderer {
     bool CreateDefaultIBL();
     bool CreateMaterialResources();
     bool CreateCSMResources();
+    bool CreateSSAOTarget();
     bool CreateBloomResources();
+    bool LoadOfflineEnvironment();
     bool CreateDemoMeshes();
 
     bool UploadBufferToDeviceLocal(
@@ -283,6 +303,8 @@ class VulkanRenderer final : public IAetherisRenderer {
     void DestroyDefaultIBL() noexcept;
     void DestroyMaterialResources() noexcept;
     void DestroyCSMResources() noexcept;
+    void DestroySSAOTarget() noexcept;
+    void DestroyEnvironment() noexcept;
     void DestroyBloomResources() noexcept;
     void DestroyGBufferAttachments() noexcept;
     void DestroySwapchain() noexcept;
