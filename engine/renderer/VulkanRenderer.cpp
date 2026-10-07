@@ -1925,6 +1925,7 @@ bool VulkanRenderer::CreateShaderModules() {
         {"deferred_lighting_mobile.frag.spv", &lightingFrag_},
         {"shadow_mobile.vert.spv", &shadowVert_},
         {"shadow_mobile.frag.spv", &shadowFrag_},
+        {"ssao_mobile.frag.spv", &ssaoFrag_},
         {"bloom_downsample_mobile.frag.spv", &bloomDownFrag_},
         {"bloom_upsample_mobile.frag.spv", &bloomUpFrag_}
     }};
@@ -3074,7 +3075,7 @@ bool VulkanRenderer::CreatePipelines() {
     lightingInfo.renderPass =
         pass_;
     lightingInfo.subpass =
-        2;
+        0;
 
     if (vkCreateGraphicsPipelines(
             device_,
@@ -3171,6 +3172,57 @@ bool VulkanRenderer::CreatePipelines() {
             nullptr,
             &bloomUpPipeline_
         ) != VK_SUCCESS) {
+        return false;
+    }
+
+    const VkPipelineShaderStageCreateInfo ssaoStages[2] = {{
+        VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+        nullptr,
+        0,
+        VK_SHADER_STAGE_VERTEX_BIT,
+        fullscreenVert_,
+        "main",
+        nullptr
+    }, {
+        VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+        nullptr,
+        0,
+        VK_SHADER_STAGE_FRAGMENT_BIT,
+        ssaoFrag_,
+        "main",
+        nullptr
+    }};
+
+    VkGraphicsPipelineCreateInfo ssaoInfo{
+        VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO
+    };
+
+    ssaoInfo.stageCount = 2;
+    ssaoInfo.pStages = ssaoStages;
+    ssaoInfo.pVertexInputState = &noVertexInput;
+    ssaoInfo.pInputAssemblyState = &inputAssembly;
+    ssaoInfo.pViewportState = &viewportState;
+    ssaoInfo.pRasterizationState = &fullscreenRasterization;
+    ssaoInfo.pMultisampleState = &multisample;
+    ssaoInfo.pDepthStencilState = &noDepth;
+    ssaoInfo.pColorBlendState = &oneColorBlend;
+    ssaoInfo.pDynamicState = &dynamicState;
+    ssaoInfo.layout = ssaoLayout_;
+    ssaoInfo.renderPass = ssaoPass_;
+    ssaoInfo.subpass = 0;
+
+    if (vkCreateGraphicsPipelines(
+            device_,
+            resources_.PipelineCache(),
+            1,
+            &ssaoInfo,
+            nullptr,
+            &ssaoPipeline_
+        ) != VK_SUCCESS) {
+        AETHERIS_VK_LOGE(
+            "SSAO pipeline creation failed"
+        );
+        DestroyPipelines();
         return false;
     }
 
