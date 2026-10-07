@@ -69,6 +69,8 @@ class VulkanRenderer final : public IAetherisRenderer {
     uint32_t environmentMipLevels_{1};
     uint32_t prefilteredMipLevels_{1};
 
+    VkRenderPass safePass_{};
+    std::vector<VkFramebuffer> safeFramebuffers_{};
     VkRenderPass geometryPass_{};
     VkRenderPass pass_{};
     VkRenderPass postPass_{};
@@ -190,6 +192,15 @@ class VulkanRenderer final : public IAetherisRenderer {
     uint32_t image_{UINT32_MAX};
 
     bool initialized_{false};
+    bool deferredResourcesReady_{false};
+    bool deferredResourcesFailed_{false};
+    enum class ResourceState : uint8_t {
+        SurfaceReady,
+        AllocatingAssets,
+        Rendering,
+        Failed
+    };
+    ResourceState resourceState_{ResourceState::SurfaceReady};
     bool begun_{false};
     bool mainRenderPassActive_{false};
     bool frameRecorded_{false};
@@ -200,6 +211,10 @@ class VulkanRenderer final : public IAetherisRenderer {
     std::array<float, 3> csmSplits_{};
 
     bool CreateInstance();
+    bool CreateSafePresentationResources();
+    void DestroySafePresentationResources() noexcept;
+    bool RecordSafeClear();
+    bool EnsureDeferredResourcesInternal();
     bool CreateSurface();
     bool PickGPU();
     bool CreateDevice();
@@ -363,6 +378,8 @@ public:
     }
 
     bool Initialize(ANativeWindow*) override;
+    bool EnsureDeferredResources() override;
+    bool IsReady() const noexcept override;
     bool BeginFrame() override;
     void EndFrame() override;
 
