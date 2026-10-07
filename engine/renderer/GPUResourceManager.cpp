@@ -3,11 +3,13 @@
 #include <cstring>
 #include <fstream>
 #include <iterator>
+#include "engine/core/AetherisLog.h"
 
 namespace aetheris {
 
 bool GPUResourceManager::Initialize(VkPhysicalDevice physical, VkDevice device, const std::filesystem::path& path) noexcept {
     physical_ = physical; device_ = device;
+    AETHERIS_LOGI("GPUResourceManager initialize: physical=%p device=%p", static_cast<void*>(physical_), static_cast<void*>(device_));
     VkPipelineCacheCreateInfo pci{VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO};
     std::ifstream in(path, std::ios::binary);
     std::vector<char> data;
@@ -18,7 +20,11 @@ bool GPUResourceManager::Initialize(VkPhysicalDevice physical, VkDevice device, 
         pci.initialDataSize = 0; pci.pInitialData = nullptr;
         cacheResult = vkCreatePipelineCache(device_, &pci, nullptr, &pipelineCache_);
     }
-    if (cacheResult != VK_SUCCESS) return false;
+    if (cacheResult != VK_SUCCESS) {
+        AETHERIS_LOGE("vkCreatePipelineCache failed: %s", VkResultName(cacheResult));
+        return false;
+    }
+    AETHERIS_LOGI("GPUResourceManager ready: pipeline cache=%p", static_cast<void*>(pipelineCache_));
     return true;
 }
 
@@ -188,6 +194,7 @@ void GPUResourceManager::Shutdown() noexcept {
     for (auto& b : blocks_) if (b.memory) vkFreeMemory(device_, b.memory, nullptr);
     blocks_.fill({}); descriptorPools_.fill({}); layoutCache_.fill({});
     blockCount_ = descriptorPoolCount_ = layoutCount_ = 0; pipelineCache_ = VK_NULL_HANDLE; device_ = VK_NULL_HANDLE;
+    AETHERIS_LOGI("GPUResourceManager shutdown complete");
 }
 
 }
