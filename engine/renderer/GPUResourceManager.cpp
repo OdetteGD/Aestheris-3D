@@ -24,7 +24,7 @@ bool GPUResourceManager::Initialize(VkPhysicalDevice physical, VkDevice device, 
         AETHERIS_LOGE("vkCreatePipelineCache failed: %s", VkResultName(cacheResult));
         return false;
     }
-    AETHERIS_LOGI("GPUResourceManager ready: pipeline cache=%p", static_cast<void*>(pipelineCache_));
+    AETHERIS_LOGI("GPUResourceManager ready: pipeline cache=0x%llx", static_cast<unsigned long long>(VkHandleValue(pipelineCache_)));
     return true;
 }
 
