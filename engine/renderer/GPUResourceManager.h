@@ -54,10 +54,12 @@ public:
     bool Initialize(VkPhysicalDevice physical, VkDevice device, const std::filesystem::path& pipelineCachePath) noexcept;
     void Shutdown() noexcept;
     GpuImage CreateImage(const VkImageCreateInfo& info, VkImageAspectFlags aspect, VkMemoryPropertyFlags flags) noexcept;
+    GpuImage CreateAliasedImage(const VkImageCreateInfo& info, VkImageAspectFlags aspect, const GpuAllocation& allocation) noexcept;
+    void ResetDescriptorPool(uint32_t frameIndex) noexcept;
     GpuBuffer CreateBuffer(const VkBufferCreateInfo& info, VkMemoryPropertyFlags flags) noexcept;
     void DestroyImage(GpuImage& image) noexcept;
     void DestroyBuffer(GpuBuffer& buffer) noexcept;
-    VkDescriptorSet AllocateDescriptorSet(VkDescriptorSetLayout layout, uint32_t maxSetsPerPool = 64) noexcept;
+    VkDescriptorSet AllocateDescriptorSet(VkDescriptorSetLayout layout, uint32_t frameIndex = 0) noexcept;
     VkPipelineLayout GetOrCreatePipelineLayout(const VkPipelineLayoutCreateInfo& info, uint64_t stableHash) noexcept;
     void SavePipelineCache(const std::filesystem::path& path) noexcept;
     void ResetTransientFrameArena() noexcept;
