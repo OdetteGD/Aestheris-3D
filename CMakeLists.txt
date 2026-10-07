@@ -7,7 +7,7 @@ add_library(aetheris SHARED
  engine/core/EngineCore.cpp engine/project/VirtualFileSystem.cpp
  engine/renderer/VulkanRenderer.cpp engine/renderer/OpenGLESRenderer.cpp
  engine/renderer/AetherisRenderGraph.cpp engine/renderer/GPUResourceManager.cpp
- engine/renderer/VulkanMobileProfile.cpp engine/renderer/TextureStreaming.cpp engine/renderer/TransientAliasPlanner.cpp
+ engine/renderer/VulkanMobileProfile.cpp engine/renderer/TextureStreaming.cpp engine/renderer/TransientAliasPlanner.cpp android/AndroidHardwareBufferBridge.cpp
  android/AetherisJNI.cpp engine/shader/ShaderResourceManager.cpp)
 target_include_directories(aetheris PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 find_library(log-lib log);find_library(android-lib android)
