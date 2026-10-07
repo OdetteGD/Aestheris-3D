@@ -1,6 +1,9 @@
 #include "EngineCore.h"
 #include "engine/renderer/VulkanRenderer.h"
 #include "engine/renderer/OpenGLESRenderer.h"
+#include <array>
+#include <chrono>
+#include <span>
 
 namespace aetheris {
 
@@ -8,7 +11,8 @@ void EngineCore::RenderOneFrameLocked() {
     if (!activeRenderer_ || frameActive_) return;
     if (!activeRenderer_->BeginFrame()) return;
     frameActive_ = true;
-    activeRenderer_->DrawRenderQueue(RenderQueue{});
+    static constexpr std::array<RenderItem, 0> kEmptyItems{};
+    activeRenderer_->DrawRenderQueue(RenderQueue(std::span<const RenderItem>(kEmptyItems)));
     activeRenderer_->EndFrame();
     frameActive_ = false;
 }
@@ -20,7 +24,7 @@ void EngineCore::RenderLoop() noexcept {
             std::scoped_lock l(mutex_);
             RenderOneFrameLocked();
         }
-        std::this_thread::sleep_for(1ms);
+        std::this_thread::sleep_for(16ms);
     }
 }
 
