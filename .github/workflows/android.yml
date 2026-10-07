@@ -171,6 +171,22 @@ jobs:
           stage_mono_runtime "android-arm64" "arm64-v8a"
           stage_mono_runtime "android-arm" "armeabi-v7a"
 
+          DOTNET_ROOT="$(dirname "$(readlink -f "$(command -v dotnet)")")"
+          MANAGED_RUNTIME_ROOT="$(find "${DOTNET_ROOT}/shared/Microsoft.NETCore.App" -mindepth 1 -maxdepth 1 -type d -name "10.*" -print | sort -V | tail -n 1)"
+
+          test -n "${MANAGED_RUNTIME_ROOT}"
+          test -s "${MANAGED_RUNTIME_ROOT}/System.Private.CoreLib.dll"
+          test -s "${MANAGED_RUNTIME_ROOT}/System.Console.dll"
+          test -s "${MANAGED_RUNTIME_ROOT}/System.Runtime.InteropServices.dll"
+
+          mkdir -p app/src/main/assets/csharp/runtime
+          find "${MANAGED_RUNTIME_ROOT}" -maxdepth 1 -type f -name "*.dll" -print0 |
+            xargs -0 -r -n1 cp -t app/src/main/assets/csharp/runtime
+
+          test -s app/src/main/assets/csharp/runtime/System.Private.CoreLib.dll
+          test -s app/src/main/assets/csharp/runtime/System.Console.dll
+          test -s app/src/main/assets/csharp/runtime/System.Runtime.InteropServices.dll
+
           echo "Staged C# SDK: app/src/main/assets/csharp/sdk/AestherisCore.dll"
           find app/src/main/jniLibs -maxdepth 2 -type f -name "*.so" -print | sort
 
