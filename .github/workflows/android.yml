@@ -135,7 +135,7 @@ jobs:
 
             mkdir -p "${package_dir}"
             curl --fail --location --silent --show-error --retry 5 --retry-delay 2 \
-              "https://api.nuget.org/v3-flatcontainer/${package_id}/${DOTNET_MONO_RUNTIME_VERSION}/${package_id}-${DOTNET_MONO_RUNTIME_VERSION}.nupkg" \
+              "https://www.nuget.org/api/v2/package/${package_spec}/${DOTNET_MONO_RUNTIME_VERSION}" \
               --output "${package_file}"
             test -s "${package_file}"
 
