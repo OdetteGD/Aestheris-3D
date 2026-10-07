@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cstring>
 #include <fstream>
+#include <iterator>
 
 namespace aetheris {
 
