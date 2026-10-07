@@ -68,10 +68,13 @@ bool VulkanRenderer::Initialize(ANativeWindow* w) {
         !CreateShaderModules() ||
         !CreateDescriptorLayouts() ||
         !CreateDefaultIBL() ||
+        !CreateMaterialResources() ||
+        !CreateCSMResources() ||
         !CreateDemoMeshes() ||
         !CreateSwapchain() ||
         !CreateGBufferAttachments() ||
         !CreateHDRTarget() ||
+        !CreateBloomResources() ||
         !CreatePasses() ||
         !CreateViews() ||
         !CreateFramebuffers() ||
@@ -1761,31 +1764,6 @@ bool VulkanRenderer::CreateDescriptorPoolAndSets() {
         return false;
     }
 
-    if (vkAllocateDescriptorSets(
-            device_,
-            &(VkDescriptorSetAllocateInfo{
-                VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
-                nullptr,
-                0,
-                descriptorPool_,
-                3,
-                std::array<VkDescriptorSetLayout,3>{
-                    postSetLayout_,
-                    postSetLayout_,
-                    postSetLayout_
-                }.data()
-            }),
-            std::array<VkDescriptorSet,3>{
-                postSet_,
-                bloomDownSet_,
-                bloomUpSet_
-            }.data()
-        ) != VK_SUCCESS) {
-        return false;
-    }
-
-    // Re-allocation into the temporary std::array above cannot safely write the
-    // three member handles because the array is temporary. Allocate them directly.
     const VkDescriptorSetLayout postLayouts[3] = {
         postSetLayout_,
         postSetLayout_,
@@ -3533,6 +3511,725 @@ void VulkanRenderer::DestroyDefaultIBL() noexcept {
     irradianceImage_ = VK_NULL_HANDLE;
     irradianceMemory_ = VK_NULL_HANDLE;
     linearSampler_ = VK_NULL_HANDLE;
+}
+
+
+bool VulkanRenderer::CreateProceduralMaterialTexture(
+    uint32_t materialId,
+    uint32_t kind,
+    VkImage& image,
+    VkDeviceMemory& memory,
+    VkImageView& view)
+{
+    if (materialId >= kMaterials.size() ||
+        kind > 2) {
+        return false;
+    }
+
+    constexpr uint32_t kResolution = 4;
+    constexpr uint32_t kPixels =
+        kResolution * kResolution;
+
+    std::array<uint8_t, kPixels * 4> texels{};
+
+    const DemoMaterial& material =
+        kMaterials[materialId];
+
+    for (uint32_t y = 0; y < kResolution; ++y) {
+        for (uint32_t x = 0; x < kResolution; ++x) {
+            const uint32_t p =
+                (y * kResolution + x) * 4;
+
+            const float checker =
+                ((x + y + materialId) & 1u) != 0u
+                    ? 0.94f
+                    : 1.0f;
+
+            if (kind == 0) {
+                texels[p + 0] = static_cast<uint8_t>(
+                    std::clamp(
+                        material.color.x *
+                            checker *
+                            255.0f,
+                        0.0f,
+                        255.0f
+                    )
+                );
+                texels[p + 1] = static_cast<uint8_t>(
+                    std::clamp(
+                        material.color.y *
+                            checker *
+                            255.0f,
+                        0.0f,
+                        255.0f
+                    )
+                );
+                texels[p + 2] = static_cast<uint8_t>(
+                    std::clamp(
+                        material.color.z *
+                            checker *
+                            255.0f,
+                        0.0f,
+                        255.0f
+                    )
+                );
+                texels[p + 3] = 255;
+            } else if (kind == 1) {
+                const int bump =
+                    ((x * 17u + y * 31u + materialId * 13u) % 5u)
+                        == 0u ? 8 : 0;
+
+                texels[p + 0] =
+                    static_cast<uint8_t>(
+                        128 + bump
+                    );
+                texels[p + 1] =
+                    static_cast<uint8_t>(
+                        128 - bump
+                    );
+                texels[p + 2] = 255;
+                texels[p + 3] = 255;
+            } else {
+                texels[p + 0] =
+                    static_cast<uint8_t>(
+                        std::clamp(
+                            material.roughness *
+                                255.0f,
+                            0.0f,
+                            255.0f
+                        )
+                    );
+                texels[p + 1] =
+                    static_cast<uint8_t>(
+                        std::clamp(
+                            material.metallic *
+                                255.0f,
+                            0.0f,
+                            255.0f
+                        )
+                    );
+                texels[p + 2] = 255;
+                texels[p + 3] = 255;
+            }
+        }
+    }
+
+    if (!CreateImageRaw(
+            VK_FORMAT_R8G8B8A8_UNORM,
+            VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                VK_IMAGE_USAGE_SAMPLED_BIT,
+            0,
+            {kResolution, kResolution, 1},
+            1,
+            image,
+            memory)) {
+        return false;
+    }
+
+    if (!CreateImageViewRaw(
+            image,
+            VK_FORMAT_R8G8B8A8_UNORM,
+            VK_IMAGE_VIEW_TYPE_2D,
+            VK_IMAGE_ASPECT_COLOR_BIT,
+            1,
+            view)) {
+        vkDestroyImage(
+            device_,
+            image,
+            nullptr
+        );
+        vkFreeMemory(
+            device_,
+            memory,
+            nullptr
+        );
+        image = VK_NULL_HANDLE;
+        memory = VK_NULL_HANDLE;
+        return false;
+    }
+
+    VkBufferImageCopy copy{};
+    copy.imageSubresource = {
+        VK_IMAGE_ASPECT_COLOR_BIT,
+        0,
+        0,
+        1
+    };
+    copy.imageExtent = {
+        kResolution,
+        kResolution,
+        1
+    };
+
+    if (!UploadImage(
+            image,
+            texels.data(),
+            texels.size(),
+            &copy,
+            1)) {
+        vkDestroyImageView(
+            device_,
+            view,
+            nullptr
+        );
+        vkDestroyImage(
+            device_,
+            image,
+            nullptr
+        );
+        vkFreeMemory(
+            device_,
+            memory,
+            nullptr
+        );
+        image = VK_NULL_HANDLE;
+        memory = VK_NULL_HANDLE;
+        view = VK_NULL_HANDLE;
+        return false;
+    }
+
+    return true;
+}
+
+bool VulkanRenderer::CreateMaterialResources() {
+    for (uint32_t i = 0;
+         i < kMaxDemoMeshes;
+         ++i) {
+        MaterialGpu& material =
+            materials_[i];
+
+        VkBufferCreateInfo uniformInfo{
+            VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO
+        };
+        uniformInfo.size =
+            sizeof(std140::MaterialBlock);
+        uniformInfo.usage =
+            VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+        uniformInfo.sharingMode =
+            VK_SHARING_MODE_EXCLUSIVE;
+
+        material.uniform =
+            resources_.CreateBuffer(
+                uniformInfo,
+                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                    VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+            );
+
+        if (!material.uniform.buffer) {
+            return false;
+        }
+
+        std140::MaterialBlock block{};
+        block.baseColorMetallic = {
+            kMaterials[i].color.x,
+            kMaterials[i].color.y,
+            kMaterials[i].color.z,
+            kMaterials[i].metallic
+        };
+
+        block.roughnessNormalAo = {
+            kMaterials[i].roughness,
+            1.0f,
+            kMaterials[i].ao,
+            0.0f
+        };
+
+        void* mapped = nullptr;
+
+        if (vkMapMemory(
+                device_,
+                material.uniform.allocation.memory,
+                material.uniform.allocation.offset,
+                sizeof(block),
+                0,
+                &mapped
+            ) != VK_SUCCESS) {
+            return false;
+        }
+
+        std::memcpy(
+            mapped,
+            &block,
+            sizeof(block)
+        );
+
+        vkUnmapMemory(
+            device_,
+            material.uniform.allocation.memory
+        );
+
+        if (!CreateProceduralMaterialTexture(
+                i,
+                0,
+                material.albedo,
+                material.albedoMemory,
+                material.albedoView
+            ) ||
+            !CreateProceduralMaterialTexture(
+                i,
+                1,
+                material.normal,
+                material.normalMemory,
+                material.normalView
+            ) ||
+            !CreateProceduralMaterialTexture(
+                i,
+                2,
+                material.orm,
+                material.ormMemory,
+                material.ormView
+            )) {
+            return false;
+        }
+    }
+
+    AETHERIS_VK_LOGI(
+        "Material system initialized: %u persistent material sets",
+        kMaxDemoMeshes
+    );
+
+    return true;
+}
+
+bool VulkanRenderer::CreateCSMResources() {
+    VkFormat shadowFormat =
+        VK_FORMAT_D32_SFLOAT;
+
+    VkFormatProperties props{};
+    vkGetPhysicalDeviceFormatProperties(
+        gpu_,
+        shadowFormat,
+        &props
+    );
+
+    if ((props.optimalTilingFeatures &
+            VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT) == 0 ||
+        (props.optimalTilingFeatures &
+            VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT) == 0) {
+        shadowFormat =
+            VK_FORMAT_D16_UNORM;
+
+        vkGetPhysicalDeviceFormatProperties(
+            gpu_,
+            shadowFormat,
+            &props
+        );
+
+        if ((props.optimalTilingFeatures &
+                VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT) == 0 ||
+            (props.optimalTilingFeatures &
+                VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT) == 0) {
+            return false;
+        }
+    }
+
+    VkImageCreateInfo imageInfo{
+        VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO
+    };
+
+    imageInfo.imageType =
+        VK_IMAGE_TYPE_2D;
+    imageInfo.format =
+        shadowFormat;
+    imageInfo.extent = {
+        csmExtent_.width,
+        csmExtent_.height,
+        1
+    };
+    imageInfo.mipLevels = 1;
+    imageInfo.arrayLayers = 3;
+    imageInfo.samples =
+        VK_SAMPLE_COUNT_1_BIT;
+    imageInfo.tiling =
+        VK_IMAGE_TILING_OPTIMAL;
+    imageInfo.usage =
+        VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT |
+            VK_IMAGE_USAGE_SAMPLED_BIT;
+    imageInfo.sharingMode =
+        VK_SHARING_MODE_EXCLUSIVE;
+    imageInfo.initialLayout =
+        VK_IMAGE_LAYOUT_UNDEFINED;
+
+    if (vkCreateImage(
+            device_,
+            &imageInfo,
+            nullptr,
+            &csmImage_
+        ) != VK_SUCCESS) {
+        return false;
+    }
+
+    VkMemoryRequirements requirements{};
+    vkGetImageMemoryRequirements(
+        device_,
+        csmImage_,
+        &requirements
+    );
+
+    const uint32_t memoryType =
+        FindMemoryType(
+            requirements.memoryTypeBits,
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+        );
+
+    if (memoryType == UINT32_MAX) {
+        return false;
+    }
+
+    VkMemoryAllocateInfo allocation{
+        VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO
+    };
+
+    allocation.allocationSize =
+        requirements.size;
+    allocation.memoryTypeIndex =
+        memoryType;
+
+    if (vkAllocateMemory(
+            device_,
+            &allocation,
+            nullptr,
+            &csmMemory_
+        ) != VK_SUCCESS ||
+        vkBindImageMemory(
+            device_,
+            csmImage_,
+            csmMemory_,
+            0
+        ) != VK_SUCCESS) {
+        return false;
+    }
+
+    if (!CreateImageViewRaw(
+            csmImage_,
+            shadowFormat,
+            VK_IMAGE_VIEW_TYPE_2D_ARRAY,
+            VK_IMAGE_ASPECT_DEPTH_BIT,
+            3,
+            csmArrayView_
+        )) {
+        return false;
+    }
+
+    for (uint32_t layer = 0;
+         layer < 3;
+         ++layer) {
+        VkImageViewCreateInfo viewInfo{
+            VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO
+        };
+
+        viewInfo.image =
+            csmImage_;
+        viewInfo.viewType =
+            VK_IMAGE_VIEW_TYPE_2D;
+        viewInfo.format =
+            shadowFormat;
+        viewInfo.subresourceRange = {
+            VK_IMAGE_ASPECT_DEPTH_BIT,
+            0,
+            1,
+            layer,
+            1
+        };
+
+        if (vkCreateImageView(
+                device_,
+                &viewInfo,
+                nullptr,
+                &csmLayerViews_[layer]
+            ) != VK_SUCCESS) {
+            return false;
+        }
+    }
+
+    VkSamplerCreateInfo sampler{
+        VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO
+    };
+
+    sampler.magFilter =
+        VK_FILTER_LINEAR;
+    sampler.minFilter =
+        VK_FILTER_LINEAR;
+    sampler.mipmapMode =
+        VK_SAMPLER_MIPMAP_MODE_NEAREST;
+    sampler.addressModeU =
+        VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+    sampler.addressModeV =
+        VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+    sampler.addressModeW =
+        VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+    sampler.borderColor =
+        VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
+    sampler.compareEnable =
+        VK_TRUE;
+    sampler.compareOp =
+        VK_COMPARE_OP_LESS_OR_EQUAL;
+    sampler.minLod = 0.0f;
+    sampler.maxLod = 0.0f;
+
+    if (vkCreateSampler(
+            device_,
+            &sampler,
+            nullptr,
+            &shadowSampler_
+        ) != VK_SUCCESS) {
+        return false;
+    }
+
+    VkAttachmentDescription depthAttachment{};
+    depthAttachment.format =
+        shadowFormat;
+    depthAttachment.samples =
+        VK_SAMPLE_COUNT_1_BIT;
+    depthAttachment.loadOp =
+        VK_ATTACHMENT_LOAD_OP_CLEAR;
+    depthAttachment.storeOp =
+        VK_ATTACHMENT_STORE_OP_STORE;
+    depthAttachment.initialLayout =
+        VK_IMAGE_LAYOUT_UNDEFINED;
+    depthAttachment.finalLayout =
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+    VkAttachmentReference depthReference{
+        0,
+        VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+    };
+
+    VkSubpassDescription subpass{};
+    subpass.pipelineBindPoint =
+        VK_PIPELINE_BIND_POINT_GRAPHICS;
+    subpass.pDepthStencilAttachment =
+        &depthReference;
+
+    const std::array<VkSubpassDependency,2> deps = {{
+        {
+            VK_SUBPASS_EXTERNAL,
+            0,
+            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+            VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT,
+            VK_ACCESS_SHADER_READ_BIT,
+            VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+            VK_DEPENDENCY_BY_REGION_BIT
+        },
+        {
+            0,
+            VK_SUBPASS_EXTERNAL,
+            VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
+            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+            VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+            VK_ACCESS_SHADER_READ_BIT,
+            VK_DEPENDENCY_BY_REGION_BIT
+        }
+    }};
+
+    VkRenderPassCreateInfo renderPassInfo{
+        VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO
+    };
+    renderPassInfo.attachmentCount = 1;
+    renderPassInfo.pAttachments =
+        &depthAttachment;
+    renderPassInfo.subpassCount = 1;
+    renderPassInfo.pSubpasses =
+        &subpass;
+    renderPassInfo.dependencyCount = 2;
+    renderPassInfo.pDependencies =
+        deps.data();
+
+    if (vkCreateRenderPass(
+            device_,
+            &renderPassInfo,
+            nullptr,
+            &shadowPass_
+        ) != VK_SUCCESS) {
+        return false;
+    }
+
+    for (uint32_t layer = 0;
+         layer < 3;
+         ++layer) {
+        VkFramebufferCreateInfo fbInfo{
+            VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO
+        };
+        fbInfo.renderPass =
+            shadowPass_;
+        fbInfo.attachmentCount =
+            1;
+        fbInfo.pAttachments =
+            &csmLayerViews_[layer];
+        fbInfo.width =
+            csmExtent_.width;
+        fbInfo.height =
+            csmExtent_.height;
+        fbInfo.layers = 1;
+
+        if (vkCreateFramebuffer(
+                device_,
+                &fbInfo,
+                nullptr,
+                &shadowFramebuffers_[layer]
+            ) != VK_SUCCESS) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool VulkanRenderer::CreateBloomResources() {
+    bloomExtent_ = {
+        std::max(
+            1u,
+            extent_.width / 2
+        ),
+        std::max(
+            1u,
+            extent_.height / 2
+        )
+    };
+
+    const VkFormat bloomFormat =
+        hdrFormat_;
+
+    if (!CreateImageRaw(
+            bloomFormat,
+            VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+                VK_IMAGE_USAGE_SAMPLED_BIT,
+            0,
+            {bloomExtent_.width, bloomExtent_.height, 1},
+            1,
+            bloomA_,
+            bloomAMemory_
+        ) ||
+        !CreateImageViewRaw(
+            bloomA_,
+            bloomFormat,
+            VK_IMAGE_VIEW_TYPE_2D,
+            VK_IMAGE_ASPECT_COLOR_BIT,
+            1,
+            bloomAView_
+        ) ||
+        !CreateImageRaw(
+            bloomFormat,
+            VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+                VK_IMAGE_USAGE_SAMPLED_BIT,
+            0,
+            {bloomExtent_.width, bloomExtent_.height, 1},
+            1,
+            bloomB_,
+            bloomBMemory_
+        ) ||
+        !CreateImageViewRaw(
+            bloomB_,
+            bloomFormat,
+            VK_IMAGE_VIEW_TYPE_2D,
+            VK_IMAGE_ASPECT_COLOR_BIT,
+            1,
+            bloomBView_
+        )) {
+        return false;
+    }
+
+    const VkAttachmentDescription attachment{
+        0,
+        bloomFormat,
+        VK_SAMPLE_COUNT_1_BIT,
+        VK_ATTACHMENT_LOAD_OP_CLEAR,
+        VK_ATTACHMENT_STORE_OP_STORE,
+        VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+        VK_ATTACHMENT_STORE_OP_DONT_CARE,
+        VK_IMAGE_LAYOUT_UNDEFINED,
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+    };
+
+    const VkAttachmentReference color{
+        0,
+        VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+    };
+
+    VkSubpassDescription subpass{};
+    subpass.pipelineBindPoint =
+        VK_PIPELINE_BIND_POINT_GRAPHICS;
+    subpass.colorAttachmentCount = 1;
+    subpass.pColorAttachments =
+        &color;
+
+    const VkSubpassDependency dep{
+        VK_SUBPASS_EXTERNAL,
+        0,
+        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+        VK_ACCESS_SHADER_READ_BIT,
+        VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+        VK_DEPENDENCY_BY_REGION_BIT
+    };
+
+    VkRenderPassCreateInfo downInfo{
+        VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO
+    };
+    downInfo.attachmentCount = 1;
+    downInfo.pAttachments =
+        &attachment;
+    downInfo.subpassCount = 1;
+    downInfo.pSubpasses =
+        &subpass;
+    downInfo.dependencyCount = 1;
+    downInfo.pDependencies =
+        &dep;
+
+    if (vkCreateRenderPass(
+            device_,
+            &downInfo,
+            nullptr,
+            &bloomDownPass_
+        ) != VK_SUCCESS) {
+        return false;
+    }
+
+    if (vkCreateRenderPass(
+            device_,
+            &downInfo,
+            nullptr,
+            &bloomUpPass_
+        ) != VK_SUCCESS) {
+        return false;
+    }
+
+    VkFramebufferCreateInfo downFb{
+        VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO
+    };
+    downFb.renderPass =
+        bloomDownPass_;
+    downFb.attachmentCount = 1;
+    downFb.pAttachments =
+        &bloomAView_;
+    downFb.width =
+        bloomExtent_.width;
+    downFb.height =
+        bloomExtent_.height;
+    downFb.layers = 1;
+
+    VkFramebufferCreateInfo upFb = downFb;
+    upFb.renderPass =
+        bloomUpPass_;
+    upFb.pAttachments =
+        &bloomBView_;
+
+    if (vkCreateFramebuffer(
+            device_,
+            &downFb,
+            nullptr,
+            &bloomDownFramebuffers_[0]
+        ) != VK_SUCCESS ||
+        vkCreateFramebuffer(
+            device_,
+            &upFb,
+            nullptr,
+            &bloomUpFramebuffers_[0]
+        ) != VK_SUCCESS) {
+        return false;
+    }
+
+    return true;
 }
 
 } // namespace aetheris
