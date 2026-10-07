@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include "engine/core/AetherisLog.h"
 
 namespace aetheris {
@@ -2135,7 +2136,8 @@ void VulkanRenderer::Shutdown() noexcept {
             geometryLayout_,
             lightingLayout_,
             postLayout_,
-            shadowLayout_
+            shadowLayout_,
+            ssaoLayout_
         };
 
         for (VkPipelineLayout layout :
