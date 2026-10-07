@@ -44,9 +44,8 @@ bool VulkanRenderer::Initialize(ANativeWindow* w) {
     }
 
     initialized_ = true;
-    AETHERIS_VK_LOGI("Initialize complete: Vulkan %u.%u, extent=%ux%u, swapchainImages=%zu",
-                      VK_VERSION_MAJOR(VK_VERSION_MINOR(supportedApi)),
-                      VK_VERSION_MINOR(supportedApi), extent_.width, extent_.height, images_.size());
+    AETHERIS_VK_LOGI("Initialize complete: extent=%ux%u, swapchainImages=%zu",
+                      extent_.width, extent_.height, images_.size());
     return true;
 }
 
