@@ -223,6 +223,19 @@ class VulkanRenderer final : public IAetherisRenderer {
     bool CreateSSAOTarget();
     bool CreateBloomResources();
     bool LoadOfflineEnvironment();
+    bool CreateKtx2Cube(
+        const std::filesystem::path& path,
+        VkImage& image,
+        VkDeviceMemory& memory,
+        VkImageView& view,
+        uint32_t& mipLevels
+    );
+    bool CreateHdrEnvironmentCube(
+        const std::filesystem::path& path,
+        VkImage& image,
+        VkDeviceMemory& memory,
+        VkImageView& view
+    );
     bool CreateDemoMeshes();
 
     bool UploadBufferToDeviceLocal(
@@ -259,11 +272,32 @@ class VulkanRenderer final : public IAetherisRenderer {
         VkDeviceMemory& memory
     );
 
+    bool CreateImageRawMip(
+        VkFormat format,
+        VkImageUsageFlags usage,
+        VkImageCreateFlags flags,
+        VkExtent3D extent,
+        uint32_t mipLevels,
+        uint32_t arrayLayers,
+        VkImage& image,
+        VkDeviceMemory& memory
+    );
+
     bool CreateImageViewRaw(
         VkImage image,
         VkFormat format,
         VkImageViewType type,
         VkImageAspectFlags aspect,
+        uint32_t layers,
+        VkImageView& view
+    );
+
+    bool CreateImageViewRawMip(
+        VkImage image,
+        VkFormat format,
+        VkImageViewType type,
+        VkImageAspectFlags aspect,
+        uint32_t mipLevels,
         uint32_t layers,
         VkImageView& view
     );
