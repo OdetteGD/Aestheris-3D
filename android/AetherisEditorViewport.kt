@@ -14,22 +14,14 @@ class AetherisEditorViewport @JvmOverloads constructor(
     init { holder.addCallback(this) }
 
     override fun surfaceCreated(holder: SurfaceHolder) {
-        nativeRegisterEditorSurface(holder.surface)
+        AetherisNative.nativeRegisterEditorSurface(holder.surface)
     }
 
     override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
-        nativeResizeViewport(holder.surface, width, height)
+        AetherisNative.nativeResizeViewport(holder.surface, width, height)
     }
 
     override fun surfaceDestroyed(holder: SurfaceHolder) {
-        nativeReleaseSurface()
-    }
-
-    private external fun nativeRegisterEditorSurface(surface: Surface)
-    private external fun nativeResizeViewport(surface: Surface, width: Int, height: Int)
-    private external fun nativeReleaseSurface()
-
-    companion object {
-        init { System.loadLibrary("aetheris") }
+        AetherisNative.nativeReleaseSurface()
     }
 }
