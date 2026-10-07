@@ -8,37 +8,39 @@ namespace aetheris::std140 {
 
 struct alignas(16) Vec4 { float x{}, y{}, z{}, w{}; };
 struct alignas(16) Mat4 { std::array<float, 16> m{}; };
-struct alignas(16) UVec4 { uint32_t x{}, y{}, z{}, w{}; };
 
-template <typename T>
-struct alignas(16) BlockValue {
-    static_assert(std::is_trivially_copyable_v<T>);
-    T value{};
-};
-
-struct alignas(16) CameraBlock {
-    Mat4 viewProj{};
-    Vec4 cameraPosition{};
-    Vec4 viewportAndTime{};
-};
-
-// Matches shaders/deferred_lighting_mobile.frag::Frame exactly.
-// std140 rounds the final uniform-block size to a 16-byte multiple.
 struct alignas(16) DeferredFrameBlock {
     Vec4 cameraPosition{};
     Vec4 sunDirection{};
     Vec4 sunColor{};
-    float maxPrefilterMip{};
-    float padding0{};
-    float padding1{};
-    float padding2{};
+    Vec4 skyParams{};       // x exposure, y cloudCoverage, z cloudSpeed, w mieStrength
+    Vec4 cameraRight{};
+    Vec4 cameraUp{};
+    Vec4 cameraForward{};
+    Mat4 invViewProj{};
+    Vec4 csmSplits{};
 };
 
-static_assert(alignof(Vec4) == 16 && sizeof(Vec4) == 16);
-static_assert(alignof(Mat4) == 16 && sizeof(Mat4) == 64);
-static_assert(alignof(CameraBlock) == 16 && offsetof(CameraBlock, cameraPosition) == 64);
-static_assert(alignof(DeferredFrameBlock) == 16 &&
-              offsetof(DeferredFrameBlock, maxPrefilterMip) == 48 &&
-              sizeof(DeferredFrameBlock) == 64);
+struct alignas(16) CsmBlock {
+    Mat4 lightViewProj[3]{};
+    Vec4 splits{};
+};
+
+struct alignas(16) MaterialBlock {
+    Vec4 baseColorMetallic{};
+    Vec4 roughnessNormalAo{}; // x roughness, y normalStrength, z AO, w unused
+};
+
+static_assert(std::is_trivially_copyable_v<DeferredFrameBlock>);
+static_assert(std::is_trivially_copyable_v<CsmBlock>);
+static_assert(std::is_trivially_copyable_v<MaterialBlock>);
+
+static_assert(sizeof(Vec4) == 16);
+static_assert(sizeof(Mat4) == 64);
+static_assert(sizeof(DeferredFrameBlock) == 192);
+static_assert(offsetof(DeferredFrameBlock, invViewProj) == 96);
+static_assert(offsetof(DeferredFrameBlock, csmSplits) == 176);
+static_assert(sizeof(CsmBlock) == 208);
+static_assert(sizeof(MaterialBlock) == 32);
 
 }
