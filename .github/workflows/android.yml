@@ -194,8 +194,8 @@ jobs:
 
           command -v unzip >/dev/null 2>&1
 
-          unzip -l "${APK}" | grep -F "lib/armeabi-v7a/libaetheris.so"
-          unzip -l "${APK}" | grep -F "lib/arm64-v8a/libaetheris.so"
+          unzip -l "${APK}" | grep -F "lib/armeabi-v7a/libaetheris3d.so"
+          unzip -l "${APK}" | grep -F "lib/arm64-v8a/libaetheris3d.so"
 
           echo "Both Aetheris native ABIs are present."
 
