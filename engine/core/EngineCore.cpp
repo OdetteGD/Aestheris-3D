@@ -4,7 +4,8 @@
 namespace aetheris {
 EngineCore& EngineCore::Instance()noexcept{static EngineCore e;return e;}
 std::unique_ptr<IAetherisRenderer> EngineCore::MakeRenderer(RenderAPI a){
- return a==RenderAPI::VULKAN?std::make_unique<VulkanRenderer>(projectRoot_):std::make_unique<OpenGLESRenderer>();
+ if(a==RenderAPI::VULKAN)return std::make_unique<VulkanRenderer>(projectRoot_);
+ return std::make_unique<OpenGLESRenderer>();
 }
 bool EngineCore::CreateRendererLocked(RenderAPI a,ANativeWindow*w){
  auto r=MakeRenderer(a); if(!r||!r->Initialize(w))return false;
