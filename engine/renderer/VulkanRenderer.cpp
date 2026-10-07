@@ -3475,14 +3475,16 @@ bool VulkanRenderer::CreateDefaultIBL() {
         VK_FILTER_LINEAR;
     sampler.mipmapMode =
         VK_SAMPLER_MIPMAP_MODE_LINEAR;
+
     sampler.addressModeU =
         VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
     sampler.addressModeV =
         VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
     sampler.addressModeW =
         VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+
     sampler.minLod = 0.0f;
-    sampler.maxLod = 1.0f;
+    sampler.maxLod = 0.0f;
 
     if (vkCreateSampler(
             device_,
@@ -3493,16 +3495,149 @@ bool VulkanRenderer::CreateDefaultIBL() {
         return false;
     }
 
-    const std::array<uint8_t, 4> white = {
-        255, 255, 255, 255
+    constexpr uint32_t resolution = 16;
+    constexpr uint32_t faceBytes =
+        resolution *
+        resolution *
+        4;
+
+    std::array<uint8_t, faceBytes * 6>
+        environment{};
+
+    const Vec4 sun{
+        -0.35f,
+        -1.0f,
+        -0.25f,
+        0.0f
     };
+
+    for (uint32_t face=0; face<6; ++face) {
+        for (uint32_t y=0; y<resolution; ++y) {
+            for (uint32_t x=0; x<resolution; ++x) {
+                const float u =
+                    (
+                        static_cast<float>(x) +
+                        0.5f
+                    ) /
+                    static_cast<float>(resolution) *
+                    2.0f -
+                    1.0f;
+
+                const float v =
+                    (
+                        static_cast<float>(y) +
+                        0.5f
+                    ) /
+                    static_cast<float>(resolution) *
+                    2.0f -
+                    1.0f;
+
+                float dx=0.0f;
+                float dy=0.0f;
+                float dz=0.0f;
+
+                switch (face) {
+                    case 0: dx= 1.0f; dy=-v; dz=-u; break;
+                    case 1: dx=-1.0f; dy=-v; dz= u; break;
+                    case 2: dx= u;    dy= 1.0f; dz= v; break;
+                    case 3: dx= u;    dy=-1.0f; dz=-v; break;
+                    case 4: dx= u;    dy=-v; dz= 1.0f; break;
+                    default:dx=-u;    dy=-v; dz=-1.0f; break;
+                }
+
+                const float len =
+                    std::sqrt(
+                        dx*dx +
+                        dy*dy +
+                        dz*dz
+                    );
+
+                dx /= std::max(len,1e-5f);
+                dy /= std::max(len,1e-5f);
+                dz /= std::max(len,1e-5f);
+
+                const float horizon =
+                    1.0f -
+                    std::clamp(
+                        dy,
+                        -1.0f,
+                        1.0f
+                    );
+
+                const float sunDot =
+                    std::max(
+                        dx*sun.x +
+                        dy*sun.y +
+                        dz*sun.z,
+                        0.0f
+                    );
+
+                const float sunGlow =
+                    std::pow(
+                        sunDot,
+                        64.0f
+                    );
+
+                const float r =
+                    0.035f +
+                    0.20f*horizon +
+                    5.0f*sunGlow;
+
+                const float g =
+                    0.085f +
+                    0.24f*horizon +
+                    4.5f*sunGlow;
+
+                const float b =
+                    0.22f +
+                    0.40f*horizon +
+                    3.5f*sunGlow;
+
+                const uint32_t offset =
+                    face*faceBytes +
+                    (
+                        y*resolution +
+                        x
+                    )*4;
+
+                environment[offset+0] =
+                    static_cast<uint8_t>(
+                        std::clamp(
+                            r*32.0f,
+                            0.0f,
+                            255.0f
+                        )
+                    );
+
+                environment[offset+1] =
+                    static_cast<uint8_t>(
+                        std::clamp(
+                            g*32.0f,
+                            0.0f,
+                            255.0f
+                        )
+                    );
+
+                environment[offset+2] =
+                    static_cast<uint8_t>(
+                        std::clamp(
+                            b*32.0f,
+                            0.0f,
+                            255.0f
+                        )
+                    );
+
+                environment[offset+3] = 255;
+            }
+        }
+    }
 
     if (!CreateImageRaw(
             VK_FORMAT_R8G8B8A8_UNORM,
             VK_IMAGE_USAGE_TRANSFER_DST_BIT |
                 VK_IMAGE_USAGE_SAMPLED_BIT,
             VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT,
-            {1,1,1},
+            {resolution,resolution,1},
             6,
             irradianceImage_,
             irradianceMemory_
@@ -3514,40 +3649,13 @@ bool VulkanRenderer::CreateDefaultIBL() {
             VK_IMAGE_ASPECT_COLOR_BIT,
             6,
             irradianceView_
-        )) {
-        return false;
-    }
-
-    std::array<VkBufferImageCopy, 6> cubeCopies{};
-
-    for (uint32_t face = 0; face < 6; ++face) {
-        cubeCopies[face].imageSubresource =
-            {
-                VK_IMAGE_ASPECT_COLOR_BIT,
-                0,
-                face,
-                1
-            };
-        cubeCopies[face].imageExtent =
-            {1,1,1};
-    }
-
-    if (!UploadImage(
-            irradianceImage_,
-            white.data(),
-            white.size(),
-            cubeCopies.data(),
-            6
-        )) {
-        return false;
-    }
-
-    if (!CreateImageRaw(
+        ) ||
+        !CreateImageRaw(
             VK_FORMAT_R8G8B8A8_UNORM,
             VK_IMAGE_USAGE_TRANSFER_DST_BIT |
                 VK_IMAGE_USAGE_SAMPLED_BIT,
             VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT,
-            {1,1,1},
+            {resolution,resolution,1},
             6,
             prefilteredImage_,
             prefilteredMemory_
@@ -3563,26 +3671,116 @@ bool VulkanRenderer::CreateDefaultIBL() {
         return false;
     }
 
+    std::array<VkBufferImageCopy,6> cubeCopies{};
+
+    for (uint32_t face=0; face<6; ++face) {
+        cubeCopies[face].bufferOffset =
+            static_cast<VkDeviceSize>(
+                face*faceBytes
+            );
+        cubeCopies[face].imageSubresource = {
+            VK_IMAGE_ASPECT_COLOR_BIT,
+            0,
+            face,
+            1
+        };
+        cubeCopies[face].imageExtent = {
+            resolution,
+            resolution,
+            1
+        };
+    }
+
     if (!UploadImage(
+            irradianceImage_,
+            environment.data(),
+            environment.size(),
+            cubeCopies.data(),
+            6
+        ) ||
+        !UploadImage(
             prefilteredImage_,
-            white.data(),
-            white.size(),
+            environment.data(),
+            environment.size(),
             cubeCopies.data(),
             6
         )) {
         return false;
     }
 
-    const std::array<uint8_t, 2> brdf = {
-        255, 0
-    };
+    constexpr uint32_t lutResolution = 32;
+
+    std::array<uint8_t, lutResolution * lutResolution * 2>
+        brdf{};
+
+    for (uint32_t y=0; y<lutResolution; ++y) {
+        for (uint32_t x=0; x<lutResolution; ++x) {
+            const float NoV =
+                (
+                    static_cast<float>(x) +
+                    0.5f
+                ) /
+                static_cast<float>(lutResolution);
+
+            const float roughness =
+                (
+                    static_cast<float>(y) +
+                    0.5f
+                ) /
+                static_cast<float>(lutResolution);
+
+            // Mobile analytical split-sum approximation:
+            // A retains the view-dependent visibility term;
+            // B approximates the grazing-angle energy compensation.
+            const float A =
+                std::clamp(
+                    1.0f -
+                    roughness *
+                        (
+                            0.45f +
+                            0.55f *
+                                (1.0f-NoV)
+                        ),
+                    0.0f,
+                    1.0f
+                );
+
+            const float B =
+                std::clamp(
+                    roughness *
+                        (
+                            0.08f +
+                            0.30f *
+                                (1.0f-NoV)
+                        ),
+                    0.0f,
+                    1.0f
+                );
+
+            const uint32_t i =
+                (
+                    y*lutResolution +
+                    x
+                )*2;
+
+            brdf[i+0] =
+                static_cast<uint8_t>(
+                    A*255.0f
+                );
+
+            brdf[i+1] =
+                static_cast<uint8_t>(
+                    B*255.0f
+                );
+        }
+    }
 
     if (!CreateImageRaw(
             VK_FORMAT_R8G8_UNORM,
             VK_IMAGE_USAGE_TRANSFER_DST_BIT |
                 VK_IMAGE_USAGE_SAMPLED_BIT,
             0,
-            {1,1,1},
+            {lutResolution,lutResolution,1},
             1,
             brdfImage_,
             brdfMemory_
@@ -3598,22 +3796,24 @@ bool VulkanRenderer::CreateDefaultIBL() {
         return false;
     }
 
-    VkBufferImageCopy brdfCopy{};
-    brdfCopy.imageSubresource =
-        {
-            VK_IMAGE_ASPECT_COLOR_BIT,
-            0,
-            0,
-            1
-        };
-    brdfCopy.imageExtent =
-        {1,1,1};
+    VkBufferImageCopy lutCopy{};
+    lutCopy.imageSubresource = {
+        VK_IMAGE_ASPECT_COLOR_BIT,
+        0,
+        0,
+        1
+    };
+    lutCopy.imageExtent = {
+        lutResolution,
+        lutResolution,
+        1
+    };
 
     return UploadImage(
         brdfImage_,
         brdf.data(),
         brdf.size(),
-        &brdfCopy,
+        &lutCopy,
         1
     );
 }
