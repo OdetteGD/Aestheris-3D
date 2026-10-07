@@ -73,7 +73,18 @@ void EngineCore::RenderOneFrameLocked() {
 
     if (state_ == EngineState::AllocatingAssets) {
         const auto start = std::chrono::steady_clock::now();
-        const bool ok = activeRenderer_->EnsureDeferredResources();
+
+        if (!demoWorldInitialized_) {
+            demoWorldInitialized_ =
+                demoWorld_.Initialize(
+                    projectRoot_,
+                    scene_
+                );
+        }
+
+        const bool ok =
+            demoWorldInitialized_ &&
+            activeRenderer_->EnsureDeferredResources();
         const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now() - start
         );
@@ -257,9 +268,6 @@ void EngineCore::OnSurfaceChanged(ANativeWindow* window) {
     if (!window || frameActive_) return;
 
     if (!activeRenderer_) {
-        if (!demoWorldInitialized_)
-            demoWorldInitialized_ = demoWorld_.Initialize(projectRoot_, scene_);
-
         if (!CreateRendererLocked(RenderAPI::VULKAN, window) &&
             !CreateRendererLocked(RenderAPI::OPENGL_ES3, window)) {
             state_ = EngineState::Uninitialized;
