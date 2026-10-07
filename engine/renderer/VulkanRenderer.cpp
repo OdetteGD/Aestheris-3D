@@ -245,7 +245,19 @@ bool VulkanRenderer::CreateSwapchain() {
     c.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
     c.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
     c.preTransform = cap.currentTransform;
-    c.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+    if (cap.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR) {
+        c.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+    } else if (cap.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR) {
+        c.compositeAlpha = VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR;
+    } else if (cap.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR) {
+        c.compositeAlpha = VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR;
+    } else {
+        c.compositeAlpha = VK_COMPOSITE_ALPHA_POST_MULTIPLIED_BIT_KHR;
+    }
+    if ((cap.supportedUsageFlags & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT) == 0) {
+        AETHERIS_VK_LOGE("Surface does not support color-attachment swapchain images");
+        return false;
+    }
     c.presentMode = mode;
     c.clipped = VK_TRUE;
 
@@ -356,7 +368,12 @@ bool VulkanRenderer::CreateFrames() {
 
 bool VulkanRenderer::Record(VkCommandBuffer cmd,uint32_t i){
     VkCommandBufferBeginInfo b{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};if(vkBeginCommandBuffer(cmd,&b)!=VK_SUCCESS)return false;
-    std::array<VkClearValue,5>clears{};clears[0].color={{0,0,0,1}};clears[1].color={{0.5f,0.5f,1,1}};clears[2].color={{0,0,0,1}};clears[3].depthStencil={1.0f,0};clears[4].color={{0.02f,0.03f,0.05f,1}};
+    std::array<VkClearValue,5>clears{};
+    clears[0].color = {{0.0f, 0.0f, 0.0f, 0.0f}};       // position.xyz, metallic.w
+    clears[1].color = {{0.5f, 0.5f, 1.0f, 0.45f}};       // encoded normal, roughness
+    clears[2].color = {{0.08f, 0.10f, 0.14f, 1.0f}};   // albedo, AO
+    clears[3].depthStencil = {1.0f, 0};
+    clears[4].color = {{0.12f, 0.18f, 0.28f, 1.0f}};   // unmistakable debug blue-gray
     VkRenderPassBeginInfo r{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};r.renderPass=pass_;r.framebuffer=fb_[i];r.renderArea.extent=extent_;r.clearValueCount=5;r.pClearValues=clears.data();
     vkCmdBeginRenderPass(cmd,&r,VK_SUBPASS_CONTENTS_INLINE);
     AETHERIS_VK_LOGD("Frame render pass begin: image=%u extent=%ux%u", i, extent_.width, extent_.height);
