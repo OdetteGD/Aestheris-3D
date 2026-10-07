@@ -18,6 +18,7 @@ class MainActivity : Activity() {
         // The native renderer only reads these immutable files during boot.
         copyAssetTree("shaders", File(projectRoot, "assets/shaders"))
         copyAssetTree("models/kenney", File(projectRoot, "assets/models/kenney"))
+        copyAssetTree("textures", File(projectRoot, "assets/textures"))
 
         AetherisNative.nativeSetProjectRoot(projectRoot)
 
