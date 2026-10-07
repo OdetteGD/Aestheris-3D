@@ -88,7 +88,21 @@ void main(){
     vec3 ambient=albedo*vec3(0.06,0.10,0.18)*(0.5+0.5*max(N.y,0.0))*kd*ao;
     vec3 hdr=direct+ambient;
 
-    const float A=2.51,Bc=0.03,C=2.43,Dc=0.59,E=0.14;
-    vec3 mapped=clamp((hdr*(A*hdr+Bc))/(hdr*(C*hdr+Dc)+E),0.0,1.0);
-    FragColor=vec4(pow(mapped,vec3(1.0/2.2)),1.0);
-}
+    const mat3 ACESInputMat = mat3(
+        0.59719, 0.35458, 0.04823,
+        0.07600, 0.90834, 0.01566,
+        0.02840, 0.13383, 0.83777
+    );
+    const mat3 ACESOutputMat = mat3(
+        1.60475, -0.53108, -0.07367,
+        -0.10208, 1.10813, -0.00605,
+        -0.00327, -0.07276, 1.07602
+    );
+
+    vec3 color = ACESInputMat * max(hdr, vec3(0.0));
+    vec3 numerator = color * (color + 0.0245786) - 0.000090537;
+    vec3 denominator = color * (0.983729 * color + 0.4329510) + 0.238081;
+    color = numerator / max(denominator, vec3(1e-5));
+    color = clamp(ACESOutputMat * color, 0.0, 1.0);
+    FragColor = vec4(pow(color, vec3(1.0 / 2.2)), 1.0);
+
