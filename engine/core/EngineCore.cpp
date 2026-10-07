@@ -4,7 +4,7 @@
 namespace aetheris {
 EngineCore& EngineCore::Instance()noexcept{static EngineCore e;return e;}
 std::unique_ptr<IAetherisRenderer> EngineCore::MakeRenderer(RenderAPI a){
- return a==RenderAPI::VULKAN?std::make_unique<VulkanRenderer>():std::make_unique<OpenGLESRenderer>();
+ return a==RenderAPI::VULKAN?std::make_unique<VulkanRenderer>(projectRoot_):std::make_unique<OpenGLESRenderer>();
 }
 bool EngineCore::CreateRendererLocked(RenderAPI a,ANativeWindow*w){
  auto r=MakeRenderer(a); if(!r||!r->Initialize(w))return false;
@@ -23,6 +23,7 @@ bool EngineCore::SwitchGraphicsAPI(RenderAPI a,ANativeWindow*w){
 bool EngineCore::BeginFrame(){std::scoped_lock l(mutex_);if(!activeRenderer_||frameActive_)return false;return frameActive_=activeRenderer_->BeginFrame();}
 void EngineCore::Draw(const RenderQueue&q){std::scoped_lock l(mutex_);if(activeRenderer_&&frameActive_)activeRenderer_->DrawRenderQueue(q);}
 void EngineCore::EndFrame(){std::scoped_lock l(mutex_);if(activeRenderer_&&frameActive_)activeRenderer_->EndFrame();frameActive_=false;}
+void EngineCore::SetProjectRoot(const std::filesystem::path& root){std::scoped_lock l(mutex_);if(frameActive_||activeRenderer_)return;projectRoot_=root;}
 void EngineCore::OnSurfaceChanged(ANativeWindow*w){std::scoped_lock l(mutex_);if(activeRenderer_&&!frameActive_)activeRenderer_->RecreateSwapchain(w);}
 void EngineCore::ApplyGizmo(const GizmoCommand&c){
  std::scoped_lock l(mutex_);if(c.entity>=scene_.transforms.size())return;auto&t=scene_.transforms[c.entity];
