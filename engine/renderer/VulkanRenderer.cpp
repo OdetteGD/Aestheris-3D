@@ -114,6 +114,23 @@ bool VulkanRenderer::EnsureDeferredResources() {
     return true;
 }
 
+void VulkanRenderer::AbortDeferredResources() noexcept {
+    if (!device_)
+        return;
+
+    vkDeviceWaitIdle(device_);
+    DestroyDeferredResources();
+
+    deferredResourcesReady_ = false;
+    deferredResourcesFailed_ = true;
+    resourceState_ = ResourceState::Failed;
+
+    AETHERIS_VK_LOGW(
+        "Deferred resources aborted; safe-clear presentation remains active"
+    );
+}
+
+
 bool VulkanRenderer::IsReady() const noexcept {
     return initialized_ &&
         surface_ != VK_NULL_HANDLE &&
