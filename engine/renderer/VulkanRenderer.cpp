@@ -3394,7 +3394,7 @@ bool VulkanRenderer::CreatePipelines() {
     geometryInfo.layout =
         geometryLayout_;
     geometryInfo.renderPass =
-        pass_;
+        geometryPass_;
     geometryInfo.subpass =
         0;
 
