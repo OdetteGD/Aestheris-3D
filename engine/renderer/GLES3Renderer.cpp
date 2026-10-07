@@ -2211,11 +2211,29 @@ bool GLES3Renderer::Initialize(ANativeWindow* window) {
 }
 
 bool GLES3Renderer::BeginFrame() {
-    if (!initialized_ || begun_ ||
+    if (!initialized_ || begun_ || !window_)
+        return false;
+
+    if (contextLost_ ||
         display_ == EGL_NO_DISPLAY ||
         context_ == EGL_NO_CONTEXT ||
-        surface_ == EGL_NO_SURFACE)
-        return false;
+        surface_ == EGL_NO_SURFACE) {
+        tier_ = QualityTier::Tier1Framebuffer0;
+
+        if (!RecreateContextAndSurface()) {
+            __android_log_print(
+                ANDROID_LOG_ERROR,
+                kLogTag,
+                "context self-heal failed; waiting for Android surface recreation"
+            );
+            return false;
+        }
+
+        deferredReady_ = false;
+        tier2Ready_ = false;
+        tier3Ready_ = false;
+        validator_.Reset();
+    }
 
     if (!ValidateCurrentContext()) {
         tier_ = QualityTier::Tier1Framebuffer0;
