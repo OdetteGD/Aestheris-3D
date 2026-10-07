@@ -11,6 +11,8 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 add_library(aetheris3d SHARED
     engine/core/EngineCore.cpp
+    engine/assets/ObjMeshLoader.cpp
+    engine/world/DemoWorldInitializer.cpp
     engine/project/VirtualFileSystem.cpp
     engine/renderer/VulkanRenderer.cpp
     engine/renderer/OpenGLESRenderer.cpp
