@@ -5482,40 +5482,48 @@ bool VulkanRenderer::CreateBloomResources() {
         )
     };
 
-    const VkFormat bloomFormat =
+    const VkFormat format =
         hdrFormat_;
 
     if (!CreateImageRaw(
-            bloomFormat,
+            format,
             VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
                 VK_IMAGE_USAGE_SAMPLED_BIT,
             0,
-            {bloomExtent_.width, bloomExtent_.height, 1},
+            {
+                bloomExtent_.width,
+                bloomExtent_.height,
+                1
+            },
             1,
             bloomA_,
             bloomAMemory_
         ) ||
         !CreateImageViewRaw(
             bloomA_,
-            bloomFormat,
+            format,
             VK_IMAGE_VIEW_TYPE_2D,
             VK_IMAGE_ASPECT_COLOR_BIT,
             1,
             bloomAView_
         ) ||
         !CreateImageRaw(
-            bloomFormat,
+            format,
             VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
                 VK_IMAGE_USAGE_SAMPLED_BIT,
             0,
-            {bloomExtent_.width, bloomExtent_.height, 1},
+            {
+                extent_.width,
+                extent_.height,
+                1
+            },
             1,
             bloomB_,
             bloomBMemory_
         ) ||
         !CreateImageViewRaw(
             bloomB_,
-            bloomFormat,
+            format,
             VK_IMAGE_VIEW_TYPE_2D,
             VK_IMAGE_ASPECT_COLOR_BIT,
             1,
@@ -5526,7 +5534,7 @@ bool VulkanRenderer::CreateBloomResources() {
 
     const VkAttachmentDescription attachment{
         0,
-        bloomFormat,
+        format,
         VK_SAMPLE_COUNT_1_BIT,
         VK_ATTACHMENT_LOAD_OP_CLEAR,
         VK_ATTACHMENT_STORE_OP_STORE,
@@ -5545,35 +5553,43 @@ bool VulkanRenderer::CreateBloomResources() {
     subpass.pipelineBindPoint =
         VK_PIPELINE_BIND_POINT_GRAPHICS;
     subpass.colorAttachmentCount = 1;
-    subpass.pColorAttachments =
-        &color;
+    subpass.pColorAttachments = &color;
 
-    const VkSubpassDependency dep{
-        VK_SUBPASS_EXTERNAL,
-        0,
-        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-        VK_ACCESS_SHADER_READ_BIT,
-        VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-        VK_DEPENDENCY_BY_REGION_BIT
-    };
+    const std::array<VkSubpassDependency,2> deps = {{
+        {
+            VK_SUBPASS_EXTERNAL,
+            0,
+            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+            VK_ACCESS_SHADER_READ_BIT,
+            VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+            VK_DEPENDENCY_BY_REGION_BIT
+        },
+        {
+            0,
+            VK_SUBPASS_EXTERNAL,
+            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+            VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+            VK_ACCESS_SHADER_READ_BIT,
+            VK_DEPENDENCY_BY_REGION_BIT
+        }
+    }};
 
-    VkRenderPassCreateInfo downInfo{
+    VkRenderPassCreateInfo passInfo{
         VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO
     };
-    downInfo.attachmentCount = 1;
-    downInfo.pAttachments =
-        &attachment;
-    downInfo.subpassCount = 1;
-    downInfo.pSubpasses =
-        &subpass;
-    downInfo.dependencyCount = 1;
-    downInfo.pDependencies =
-        &dep;
+
+    passInfo.attachmentCount = 1;
+    passInfo.pAttachments = &attachment;
+    passInfo.subpassCount = 1;
+    passInfo.pSubpasses = &subpass;
+    passInfo.dependencyCount = 2;
+    passInfo.pDependencies = deps.data();
 
     if (vkCreateRenderPass(
             device_,
-            &downInfo,
+            &passInfo,
             nullptr,
             &bloomDownPass_
         ) != VK_SUCCESS) {
@@ -5582,7 +5598,7 @@ bool VulkanRenderer::CreateBloomResources() {
 
     if (vkCreateRenderPass(
             device_,
-            &downInfo,
+            &passInfo,
             nullptr,
             &bloomUpPass_
         ) != VK_SUCCESS) {
@@ -5592,22 +5608,30 @@ bool VulkanRenderer::CreateBloomResources() {
     VkFramebufferCreateInfo downFb{
         VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO
     };
+
     downFb.renderPass =
         bloomDownPass_;
     downFb.attachmentCount = 1;
-    downFb.pAttachments =
-        &bloomAView_;
+    downFb.pAttachments = &bloomAView_;
     downFb.width =
         bloomExtent_.width;
     downFb.height =
         bloomExtent_.height;
     downFb.layers = 1;
 
-    VkFramebufferCreateInfo upFb = downFb;
+    VkFramebufferCreateInfo upFb{
+        VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO
+    };
+
     upFb.renderPass =
         bloomUpPass_;
-    upFb.pAttachments =
-        &bloomBView_;
+    upFb.attachmentCount = 1;
+    upFb.pAttachments = &bloomBView_;
+    upFb.width =
+        extent_.width;
+    upFb.height =
+        extent_.height;
+    upFb.layers = 1;
 
     if (vkCreateFramebuffer(
             device_,
