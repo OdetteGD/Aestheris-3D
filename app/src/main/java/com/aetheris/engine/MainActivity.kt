@@ -19,6 +19,7 @@ class MainActivity : Activity() {
         copyAssetTree("shaders", File(projectRoot, "assets/shaders"))
         copyAssetTree("models/kenney", File(projectRoot, "assets/models/kenney"))
         copyAssetTree("textures", File(projectRoot, "assets/textures"))
+        copyAssetTree("fallback_shaders", File(projectRoot, "assets/fallback_shaders"))
 
         AetherisNative.nativeSetProjectRoot(projectRoot)
 
