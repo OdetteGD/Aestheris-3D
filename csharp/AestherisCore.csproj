@@ -11,10 +11,4 @@
     <Deterministic>true</Deterministic>
   </PropertyGroup>
 
-  <ItemGroup>
-    <Compile Include="AestherisComponent.cs" />
-    <Compile Include="AetherisNative.cs" />
-    <Compile Include="PlayerController.cs" />
-    <Compile Include="ScriptRuntime.cs" />
-  </ItemGroup>
 </Project>
