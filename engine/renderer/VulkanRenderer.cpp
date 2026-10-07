@@ -1,4 +1,5 @@
 #include "VulkanRenderer.h"
+#include "engine/renderer/OfflineEnvironment.h"
 #include "engine/assets/ObjMeshLoader.h"
 #include "engine/core/Std140.h"
 #include "engine/shader/ShaderResourceManager.h"
@@ -1057,162 +1058,6 @@ bool VulkanRenderer::RecordShadowMaps(
     return true;
 }
 
-bool VulkanRenderer::RecordShadowMaps(
-    const RenderQueue& queue,
-    std::span<const Transform> transforms) noexcept
-{
-    if(!shadowPass_ || !shadowPipeline_)
-        return false;
-
-    Frame& frame =
-        frames_[frame_];
-
-    vkCmdBindPipeline(
-        frame.cmd,
-        VK_PIPELINE_BIND_POINT_GRAPHICS,
-        shadowPipeline_
-    );
-
-    for(uint32_t cascade=0;
-        cascade<3;
-        ++cascade) {
-
-        VkClearValue clear{};
-        clear.depthStencil =
-            {1.0f,0};
-
-        VkRenderPassBeginInfo begin{
-            VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO
-        };
-
-        begin.renderPass =
-            shadowPass_;
-        begin.framebuffer =
-            shadowFramebuffers_[cascade];
-        begin.renderArea.extent =
-            csmExtent_;
-        begin.clearValueCount = 1;
-        begin.pClearValues =
-            &clear;
-
-        vkCmdBeginRenderPass(
-            frame.cmd,
-            &begin,
-            VK_SUBPASS_CONTENTS_INLINE
-        );
-
-        VkViewport viewport{
-            0.0f,
-            0.0f,
-            static_cast<float>(
-                csmExtent_.width
-            ),
-            static_cast<float>(
-                csmExtent_.height
-            ),
-            0.0f,
-            1.0f
-        };
-
-        VkRect2D scissor{
-            {0,0},
-            csmExtent_
-        };
-
-        vkCmdSetViewport(
-            frame.cmd,0,1,&viewport
-        );
-
-        vkCmdSetScissor(
-            frame.cmd,0,1,&scissor
-        );
-
-        uint32_t boundMesh =
-            UINT32_MAX;
-
-        for(const RenderItem& item :
-            queue.Items()) {
-
-            if(item.meshId >= kMaxDemoMeshes ||
-               item.transformIndex >=
-                   transforms.size())
-                continue;
-
-            const MeshGpu& mesh =
-                demoMeshes_[item.meshId];
-
-            if(!mesh.vertex.buffer ||
-               !mesh.index.buffer ||
-               mesh.indexCount == 0)
-                continue;
-
-            if(boundMesh != item.meshId) {
-                const VkBuffer vb =
-                    mesh.vertex.buffer;
-
-                const VkDeviceSize offset = 0;
-
-                vkCmdBindVertexBuffers(
-                    frame.cmd,
-                    0,1,&vb,&offset
-                );
-
-                vkCmdBindIndexBuffer(
-                    frame.cmd,
-                    mesh.index.buffer,
-                    0,
-                    VK_INDEX_TYPE_UINT32
-                );
-
-                boundMesh =
-                    item.meshId;
-            }
-
-            struct alignas(16) ShadowPush final {
-                Mat4 lightViewProj{};
-                Mat4 model{};
-            };
-
-            static_assert(
-                sizeof(ShadowPush) == 128
-            );
-
-            ShadowPush push{};
-            push.lightViewProj =
-                csmMatrices_[cascade];
-            push.model =
-                MakeModel(
-                    transforms[
-                        item.transformIndex
-                    ]
-                );
-
-            vkCmdPushConstants(
-                frame.cmd,
-                shadowLayout_,
-                VK_SHADER_STAGE_VERTEX_BIT,
-                0,
-                sizeof(push),
-                &push
-            );
-
-            vkCmdDrawIndexed(
-                frame.cmd,
-                mesh.indexCount,
-                1,
-                0,
-                0,
-                0
-            );
-        }
-
-        vkCmdEndRenderPass(
-            frame.cmd
-        );
-    }
-
-    return true;
-}
 
 void VulkanRenderer::DrawRenderQueue(
     const RenderQueue& queue,
@@ -2426,7 +2271,7 @@ bool VulkanRenderer::CreateShaderModules() {
         VkShaderModule* output;
     };
 
-    const std::array<ShaderFile, 8> files = {{
+    const std::array<ShaderFile, 9> files = {{
         {"gbuffer_mobile.vert.spv", &geometryVert_},
         {"gbuffer_mobile.frag.spv", &geometryFrag_},
         {"fullscreen_triangle.vert.spv", &fullscreenVert_},
@@ -3124,32 +2969,29 @@ bool VulkanRenderer::CreateDescriptorPoolAndSets() {
             }
         }};
 
-    const VkWriteDescriptorSet postWrites[2] = {{
-        {
-            VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-            nullptr,
-            postSet_,
-            0,
-            0,
-            1,
-            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            &postImages[0],
-            nullptr,
-            nullptr
-        },
-        {
-            VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-            nullptr,
-            postSet_,
-            1,
-            0,
-            1,
-            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            &postImages[1],
-            nullptr,
-            nullptr
-        }
-    }};
+    VkWriteDescriptorSet postWrites[2]{};
+
+    postWrites[0] = {
+        VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET
+    };
+    postWrites[0].dstSet = postSet_;
+    postWrites[0].dstBinding = 0;
+    postWrites[0].descriptorCount = 1;
+    postWrites[0].descriptorType =
+        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    postWrites[0].pImageInfo =
+        &postImages[0];
+
+    postWrites[1] = {
+        VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET
+    };
+    postWrites[1].dstSet = postSet_;
+    postWrites[1].dstBinding = 1;
+    postWrites[1].descriptorCount = 1;
+    postWrites[1].descriptorType =
+        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    postWrites[1].pImageInfo =
+        &postImages[1];
 
     vkUpdateDescriptorSets(
         device_,
@@ -5016,6 +4858,8 @@ bool VulkanRenderer::CreateDefaultIBL() {
             )
             : projectRoot_ /
                 "assets/textures";
+
+    uint32_t irradianceMipLevels = 1;
 
     if (!CreateKtx2Cube(
             root / "ibl_irradiance.ktx2",
