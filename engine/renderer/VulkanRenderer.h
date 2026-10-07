@@ -3,8 +3,12 @@
 #include <array>
 #include <vector>
 #include <vulkan/vulkan.h>
+#include "engine/renderer/GPUResourceManager.h"
+#include <filesystem>
 namespace aetheris {
 class VulkanRenderer final:public IAetherisRenderer{
+ std::filesystem::path projectRoot_{};
+ GPUResourceManager resources_{};
  static constexpr uint32_t Frames=3;
  struct Frame{VkCommandPool pool{};VkCommandBuffer cmd{};VkSemaphore imageAvailable{};VkSemaphore renderFinished{};VkFence fence{};};
  VkInstance instance_{};VkPhysicalDevice gpu_{};VkDevice device_{};VkSurfaceKHR surface_{};VkQueue queue_{};
@@ -14,6 +18,7 @@ class VulkanRenderer final:public IAetherisRenderer{
  bool CreateInstance(),CreateSurface(),PickGPU(),CreateDevice(),CreateSwapchain(),CreatePass(),CreateViews(),CreateFramebuffers(),CreateFrames();
  bool Record(VkCommandBuffer,uint32_t);void DestroySwapchain()noexcept;
 public:
+ explicit VulkanRenderer(std::filesystem::path projectRoot = {}) : projectRoot_(std::move(projectRoot)) {}
  ~VulkanRenderer()override{Shutdown();}
  bool Initialize(ANativeWindow*)override;bool BeginFrame()override;void EndFrame()override;bool RecreateSwapchain(ANativeWindow*)override;
  void ReleaseSurface() noexcept override;
