@@ -4742,11 +4742,13 @@ Mat4 VulkanRenderer::MakeOrthographic(
             1e-5f
         );
 
+    // View space is right-handed with forward = -Z. Map
+    // z in [-far, -near] to Vulkan NDC [0,1].
     result.m[10] =
         1.0f /
-        std::max(
-            f-n,
-            1e-5f
+        std::min(
+            n-f,
+            -1e-5f
         );
 
     result.m[12] =
