@@ -22,6 +22,8 @@ layout(set=1,binding=1) uniform samplerCube Irradiance;
 layout(set=1,binding=2) uniform samplerCube PrefilteredEnv;
 layout(set=1,binding=3) uniform sampler2D BrdfLut;
 layout(set=1,binding=4) uniform sampler2DArrayShadow ShadowMap;
+layout(set=1,binding=5) uniform samplerCube EnvironmentCube;
+layout(set=1,binding=6) uniform sampler2D SSAOMap;
 
 const float PI = 3.14159265359;
 
@@ -496,9 +498,24 @@ void main()
                 F.CameraPosition.xyz
             );
 
+        vec3 hdrSky =
+            textureLod(
+                EnvironmentCube,
+                ray,
+                0.0
+            ).rgb;
+
+        // Offline HDR environment is the canonical background. Procedural
+        // atmosphere is retained only as an emergency fallback when the
+        // sampled environment is effectively black.
+        if (dot(hdrSky,hdrSky) < 1e-6)
+            hdrSky =
+                skyColor(ray);
+
         OutColor =
             vec4(
-                skyColor(ray),
+                hdrSky *
+                F.SkyParams.x,
                 1.0
             );
         return;
@@ -678,6 +695,20 @@ void main()
             )
         ).rg;
 
+    float ssao =
+        clamp(
+            texture(
+                SSAOMap,
+                gl_FragCoord.xy /
+                vec2(
+                    max(F.CameraRight.w,1.0),
+                    max(F.CameraUp.w,1.0)
+                )
+            ).r,
+            0.12,
+            1.0
+        );
+
     vec3 ambient =
         (
             diffuseIBL +
@@ -688,7 +719,8 @@ void main()
                 brdf.y
             )
         ) *
-        ao;
+        ao *
+        ssao;
 
     OutColor =
         vec4(
