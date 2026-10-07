@@ -111,6 +111,8 @@ class VulkanRenderer final : public IAetherisRenderer {
     VkDescriptorSet lightingInputSet_{};
     VkDescriptorSet lightingFrameSet_{};
     VkDescriptorSet postSet_{};
+    VkDescriptorSet bloomDownSet_{};
+    VkDescriptorSet bloomUpSet_{};
     std::array<VkDescriptorSet, kMaxDemoMeshes> materialSets_{};
     VkDescriptorSet shadowSet_{};
 
@@ -270,6 +272,7 @@ class VulkanRenderer final : public IAetherisRenderer {
         float farPlane
     ) noexcept;
 
+    bool RecordShadowMaps(const RenderQueue& queue, std::span<const Transform> transforms) noexcept;
     bool RecordGeometry(const RenderQueue& queue, std::span<const Transform> transforms);
     bool RecordLighting();
     bool RecordPost();
