@@ -109,7 +109,7 @@ bool VulkanRenderer::CreateSurface() {
     c.window = window_;
     const VkResult result = vkCreateAndroidSurfaceKHR(instance_, &c, nullptr, &surface_);
     if (result != VK_SUCCESS) AETHERIS_VK_LOGE("vkCreateAndroidSurfaceKHR failed: %s", VkResultName(result));
-    else AETHERIS_VK_LOGI("Android Vulkan surface created: %p", static_cast<void*>(surface_));
+    else AETHERIS_VK_LOGI("Android Vulkan surface created: 0x%llx", static_cast<unsigned long long>(VkHandleValue(surface_)));
     return result == VK_SUCCESS;
 }
 
