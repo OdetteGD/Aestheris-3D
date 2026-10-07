@@ -157,6 +157,15 @@ class VulkanRenderer final : public IAetherisRenderer {
         uint32_t copyCount
     );
 
+    bool CreateAttachmentImage(
+        VkFormat,
+        VkImageUsageFlags,
+        VkImage&,
+        VkDeviceMemory&,
+        VkImageView&,
+        VkImageAspectFlags
+    );
+
     bool CreateImageRaw(
         VkFormat format,
         VkImageUsageFlags usage,
