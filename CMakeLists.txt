@@ -12,6 +12,6 @@ add_library(aetheris SHARED
 target_include_directories(aetheris PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 find_library(log-lib log);find_library(android-lib android)
 target_link_libraries(aetheris PRIVATE ${log-lib} ${android-lib} vulkan EGL GLESv3)
-target_compile_definitions(aetheris PRIVATE AETHERIS_ANDROID=1)
+target_compile_definitions(aetheris PRIVATE AETHERIS_ANDROID=1 VK_USE_PLATFORM_ANDROID_KHR=1)
 target_compile_options(aetheris PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror=return-type)
 set_target_properties(aetheris PROPERTIES CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN YES)
