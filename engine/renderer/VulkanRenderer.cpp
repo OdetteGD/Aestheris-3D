@@ -422,7 +422,7 @@ void VulkanRenderer::DestroyGBufferAttachments() noexcept {
     depthMemory_ = {};
 }
 bool VulkanRenderer::CreatePasses() {
-    std::array<VkAttachmentDescription, 5> attachments{};
+    std::array<VkAttachmentDescription, 6> attachments{};
 
     constexpr VkFormat gFormats[3] = {
         VK_FORMAT_R16G16B16A16_SFLOAT,
@@ -430,11 +430,11 @@ bool VulkanRenderer::CreatePasses() {
         VK_FORMAT_R8G8B8A8_UNORM
     };
 
-    for (uint32_t i = 0; i < 3; ++i) {
+    for (uint32_t i=0; i<3; ++i) {
         attachments[i].format = gFormats[i];
         attachments[i].samples = VK_SAMPLE_COUNT_1_BIT;
         attachments[i].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-        attachments[i].storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        attachments[i].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
         attachments[i].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
         attachments[i].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
         attachments[i].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
@@ -444,50 +444,99 @@ bool VulkanRenderer::CreatePasses() {
     attachments[3].format = depthFormat_;
     attachments[3].samples = VK_SAMPLE_COUNT_1_BIT;
     attachments[3].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    attachments[3].storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    attachments[3].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
     attachments[3].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    attachments[3].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+    attachments[3].finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
-    attachments[4].format = hdrFormat_;
+    attachments[4].format = ssaoFormat_;
     attachments[4].samples = VK_SAMPLE_COUNT_1_BIT;
     attachments[4].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    attachments[4].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    attachments[4].storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
     attachments[4].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     attachments[4].finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
-    const std::array<VkAttachmentReference, 3> colors = {{
+    attachments[5].format = hdrFormat_;
+    attachments[5].samples = VK_SAMPLE_COUNT_1_BIT;
+    attachments[5].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    attachments[5].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    attachments[5].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    attachments[5].finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+    const std::array<VkAttachmentReference,3> geometryColors = {{
         {0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL},
         {1, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL},
         {2, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL}
     }};
-    const VkAttachmentReference depth{
-        3, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+
+    const VkAttachmentReference depthAttachment{
+        3,
+        VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
     };
-    const std::array<VkAttachmentReference, 3> inputs = {{
+
+    const std::array<VkAttachmentReference,2> ssaoInputs = {{
+        {1, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+        {3, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL}
+    }};
+
+    const VkAttachmentReference ssaoOutput{
+        4,
+        VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+    };
+
+    const std::array<VkAttachmentReference,4> lightingInputs = {{
         {0, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
         {1, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-        {2, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL}
+        {2, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+        {4, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL}
     }};
-    const VkAttachmentReference hdr{
-        4, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+
+    const VkAttachmentReference hdrOutput{
+        5,
+        VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
     };
 
     VkSubpassDescription geometry{};
-    geometry.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-    geometry.colorAttachmentCount = 3;
-    geometry.pColorAttachments = colors.data();
-    geometry.pDepthStencilAttachment = &depth;
+    geometry.pipelineBindPoint =
+        VK_PIPELINE_BIND_POINT_GRAPHICS;
+    geometry.colorAttachmentCount =
+        static_cast<uint32_t>(
+            geometryColors.size()
+        );
+    geometry.pColorAttachments =
+        geometryColors.data();
+    geometry.pDepthStencilAttachment =
+        &depthAttachment;
+
+    VkSubpassDescription ssao{};
+    ssao.pipelineBindPoint =
+        VK_PIPELINE_BIND_POINT_GRAPHICS;
+    ssao.inputAttachmentCount =
+        static_cast<uint32_t>(
+            ssaoInputs.size()
+        );
+    ssao.pInputAttachments =
+        ssaoInputs.data();
+    ssao.colorAttachmentCount = 1;
+    ssao.pColorAttachments =
+        &ssaoOutput;
 
     VkSubpassDescription lighting{};
-    lighting.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-    lighting.inputAttachmentCount = 3;
-    lighting.pInputAttachments = inputs.data();
+    lighting.pipelineBindPoint =
+        VK_PIPELINE_BIND_POINT_GRAPHICS;
+    lighting.inputAttachmentCount =
+        static_cast<uint32_t>(
+            lightingInputs.size()
+        );
+    lighting.pInputAttachments =
+        lightingInputs.data();
     lighting.colorAttachmentCount = 1;
-    lighting.pColorAttachments = &hdr;
+    lighting.pColorAttachments =
+        &hdrOutput;
 
-    const std::array<VkSubpassDependency, 3> deps = {{
+    const std::array<VkSubpassDependency,4> deps = {{
         {
-            VK_SUBPASS_EXTERNAL, 0,
+            VK_SUBPASS_EXTERNAL,
+            0,
             VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
                 VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT,
             VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
@@ -498,7 +547,19 @@ bool VulkanRenderer::CreatePasses() {
             VK_DEPENDENCY_BY_REGION_BIT
         },
         {
-            0, 1,
+            0,
+            1,
+            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
+                VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
+            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+            VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
+                VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+            VK_ACCESS_INPUT_ATTACHMENT_READ_BIT,
+            VK_DEPENDENCY_BY_REGION_BIT
+        },
+        {
+            1,
+            2,
             VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
             VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
             VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
@@ -506,69 +567,91 @@ bool VulkanRenderer::CreatePasses() {
             VK_DEPENDENCY_BY_REGION_BIT
         },
         {
-            1, VK_SUBPASS_EXTERNAL,
+            2,
+            VK_SUBPASS_EXTERNAL,
             VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT |
+                VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
             VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
             VK_ACCESS_SHADER_READ_BIT,
             VK_DEPENDENCY_BY_REGION_BIT
         }
     }};
 
-    const std::array<VkSubpassDescription, 2> subpasses = {{
-        geometry, lighting
+    const std::array<VkSubpassDescription,3> subpasses = {{
+        geometry,
+        ssao,
+        lighting
     }};
 
-    VkRenderPassCreateInfo createInfo{
+    VkRenderPassCreateInfo info{
         VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO
     };
-    createInfo.attachmentCount = static_cast<uint32_t>(attachments.size());
-    createInfo.pAttachments = attachments.data();
-    createInfo.subpassCount = static_cast<uint32_t>(subpasses.size());
-    createInfo.pSubpasses = subpasses.data();
-    createInfo.dependencyCount = static_cast<uint32_t>(deps.size());
-    createInfo.pDependencies = deps.data();
+
+    info.attachmentCount =
+        static_cast<uint32_t>(
+            attachments.size()
+        );
+    info.pAttachments =
+        attachments.data();
+    info.subpassCount =
+        static_cast<uint32_t>(
+            subpasses.size()
+        );
+    info.pSubpasses =
+        subpasses.data();
+    info.dependencyCount =
+        static_cast<uint32_t>(
+            deps.size()
+        );
+    info.pDependencies =
+        deps.data();
 
     if (vkCreateRenderPass(
-            device_, &createInfo, nullptr, &pass_) != VK_SUCCESS) {
+            device_,
+            &info,
+            nullptr,
+            &pass_
+        ) != VK_SUCCESS) {
+        AETHERIS_VK_LOGE(
+            "Main render pass creation failed"
+        );
         return false;
     }
 
-    VkAttachmentDescription postAttachment{};
-    postAttachment.format = format_;
-    postAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
-    postAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    postAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    postAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    postAttachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    const VkAttachmentDescription postAttachment{
+        0,
+        format_,
+        VK_SAMPLE_COUNT_1_BIT,
+        VK_ATTACHMENT_LOAD_OP_CLEAR,
+        VK_ATTACHMENT_STORE_OP_STORE,
+        VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+        VK_ATTACHMENT_STORE_OP_DONT_CARE,
+        VK_IMAGE_LAYOUT_UNDEFINED,
+        VK_IMAGE_LAYOUT_PRESENT_SRC_KHR
+    };
 
     const VkAttachmentReference postColor{
-        0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+        0,
+        VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
     };
 
     VkSubpassDescription postSubpass{};
-    postSubpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    postSubpass.pipelineBindPoint =
+        VK_PIPELINE_BIND_POINT_GRAPHICS;
     postSubpass.colorAttachmentCount = 1;
-    postSubpass.pColorAttachments = &postColor;
+    postSubpass.pColorAttachments =
+        &postColor;
 
-    const std::array<VkSubpassDependency, 2> postDeps = {{
-        {
-            VK_SUBPASS_EXTERNAL, 0,
-            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-            VK_ACCESS_SHADER_READ_BIT,
-            VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-            VK_DEPENDENCY_BY_REGION_BIT
-        },
-        {
-            0, VK_SUBPASS_EXTERNAL,
-            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-            VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
-            VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-            VK_ACCESS_MEMORY_READ_BIT,
-            VK_DEPENDENCY_BY_REGION_BIT
-        }
-    }};
+    const VkSubpassDependency postDependency{
+        VK_SUBPASS_EXTERNAL,
+        0,
+        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+        VK_ACCESS_SHADER_READ_BIT,
+        VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+        VK_DEPENDENCY_BY_REGION_BIT
+    };
 
     VkRenderPassCreateInfo postInfo{
         VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO
@@ -577,13 +660,15 @@ bool VulkanRenderer::CreatePasses() {
     postInfo.pAttachments = &postAttachment;
     postInfo.subpassCount = 1;
     postInfo.pSubpasses = &postSubpass;
-    postInfo.dependencyCount = static_cast<uint32_t>(postDeps.size());
-    postInfo.pDependencies = postDeps.data();
+    postInfo.dependencyCount = 1;
+    postInfo.pDependencies = &postDependency;
 
     if (vkCreateRenderPass(
-            device_, &postInfo, nullptr, &postPass_) != VK_SUCCESS) {
-        vkDestroyRenderPass(device_, pass_, nullptr);
-        pass_ = VK_NULL_HANDLE;
+            device_,
+            &postInfo,
+            nullptr,
+            &postPass_
+        ) != VK_SUCCESS) {
         return false;
     }
 
