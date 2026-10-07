@@ -4,6 +4,40 @@
 
 namespace aetheris {
 
+void EngineCore::RenderOneFrameLocked() {
+    if (!activeRenderer_ || frameActive_) return;
+    if (!activeRenderer_->BeginFrame()) return;
+    frameActive_ = true;
+    activeRenderer_->DrawRenderQueue(RenderQueue{});
+    activeRenderer_->EndFrame();
+    frameActive_ = false;
+}
+
+void EngineCore::RenderLoop() noexcept {
+    using namespace std::chrono_literals;
+    while (!renderStop_.load(std::memory_order_acquire)) {
+        {
+            std::scoped_lock l(mutex_);
+            RenderOneFrameLocked();
+        }
+        std::this_thread::sleep_for(1ms);
+    }
+}
+
+void EngineCore::StartRenderLoopLocked() {
+    if (renderThread_.joinable()) return;
+    renderStop_.store(false, std::memory_order_release);
+    renderThread_ = std::thread([this] { RenderLoop(); });
+}
+
+void EngineCore::StopRenderLoop() noexcept {
+    renderStop_.store(true, std::memory_order_release);
+    if (renderThread_.joinable()) {
+        if (renderThread_.get_id() == std::this_thread::get_id()) renderThread_.detach();
+        else renderThread_.join();
+    }
+}
+
 EngineCore& EngineCore::Instance() noexcept {
     static EngineCore e;
     return e;
@@ -83,11 +117,12 @@ void EngineCore::OnSurfaceChanged(ANativeWindow* w) {
     if (!w || frameActive_) return;
 
     if (!activeRenderer_) {
-        // The SurfaceView is the authoritative runtime/editor render surface.
-        // Prefer the native Vulkan renderer and use GLES only as the capability fallback.
+        // SurfaceView.surfaceCreated is the first legal point at which the native
+        // Android window exists. Create the renderer only from this callback.
         if (!CreateRendererLocked(RenderAPI::VULKAN, w)) {
             CreateRendererLocked(RenderAPI::OPENGL_ES3, w);
         }
+        if (activeRenderer_) StartRenderLoopLocked();
         return;
     }
 
@@ -95,14 +130,14 @@ void EngineCore::OnSurfaceChanged(ANativeWindow* w) {
         // Drop the stale surface so the next SurfaceView callback can bind a fresh one.
         activeRenderer_->ReleaseSurface();
     }
+    if (activeRenderer_) StartRenderLoopLocked();
 }
 
 void EngineCore::OnSurfaceDestroyed() noexcept {
+    StopRenderLoop();
     std::scoped_lock l(mutex_);
     frameActive_ = false;
-    if (activeRenderer_) {
-        activeRenderer_->ReleaseSurface();
-    }
+    if (activeRenderer_) activeRenderer_->ReleaseSurface();
 }
 
 void EngineCore::ApplyGizmo(const GizmoCommand& c) {
@@ -127,6 +162,7 @@ void EngineCore::ApplyGizmo(const GizmoCommand& c) {
 }
 
 void EngineCore::Shutdown() noexcept {
+    StopRenderLoop();
     std::scoped_lock l(mutex_);
     frameActive_ = false;
     if (activeRenderer_) {
