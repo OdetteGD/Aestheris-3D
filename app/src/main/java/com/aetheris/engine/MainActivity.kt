@@ -16,7 +16,8 @@ class MainActivity : Activity() {
 
         // Packaged SPIR-V is copied once into the persistent project sandbox.
         // The native renderer only reads these immutable files during boot.
-        copyAssetTree("shaders/spirv", File(projectRoot, "assets/shaders/spirv"))
+        copyAssetTree("shaders", File(projectRoot, "assets/shaders"))
+        copyAssetTree("models/kenney", File(projectRoot, "assets/models/kenney"))
 
         AetherisNative.nativeSetProjectRoot(projectRoot)
 
