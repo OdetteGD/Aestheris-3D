@@ -2116,16 +2116,16 @@ bool VulkanRenderer::CreateDescriptorPoolAndSets() {
         for (uint32_t i = 0; i < materialCount; ++i)
             layouts[i] = materialSetLayout_;
 
+        VkDescriptorSetAllocateInfo allocateInfo{
+            VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO
+        };
+        allocateInfo.descriptorPool = descriptorPool_;
+        allocateInfo.descriptorSetCount = materialCount;
+        allocateInfo.pSetLayouts = layouts.data();
+
         if (vkAllocateDescriptorSets(
                 device_,
-                &(VkDescriptorSetAllocateInfo{
-                    VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
-                    nullptr,
-                    0,
-                    descriptorPool_,
-                    materialCount,
-                    layouts.data()
-                }),
+                &allocateInfo,
                 materialSets_.data()
             ) != VK_SUCCESS) {
             return false;
@@ -3956,8 +3956,12 @@ bool VulkanRenderer::UpdateFrameUniforms() noexcept {
         1.0f
     };
 
-    frame.sunDirection =
-        sunDirection;
+    frame.sunDirection = {
+        sunDirection.x,
+        sunDirection.y,
+        sunDirection.z,
+        sunDirection.w
+    };
 
     // Physical HDR sun intensity; exposure/tone-map happen later.
     frame.sunColor = {
@@ -4038,8 +4042,12 @@ bool VulkanRenderer::UpdateFrameUniforms() noexcept {
             viewProj_
         );
 
-    frame.invViewProj =
-        invViewProj_;
+    for (uint32_t row = 0; row < 4; ++row) {
+        for (uint32_t column = 0; column < 4; ++column) {
+            frame.invViewProj.m[column * 4 + row] =
+                invViewProj_.m[column * 4 + row];
+        }
+    }
 
     constexpr float nearPlane = 0.1f;
     constexpr float farPlane = 150.0f;
@@ -4375,9 +4383,14 @@ bool VulkanRenderer::UpdateFrameUniforms() noexcept {
             split;
     }
 
-    for (uint32_t i=0;i<3;++i)
-        frame.csmMatrices[i] =
-            csmMatrices_[i];
+    for (uint32_t i = 0; i < 3; ++i) {
+        for (uint32_t row = 0; row < 4; ++row) {
+            for (uint32_t column = 0; column < 4; ++column) {
+                frame.csmMatrices[i].m[column * 4 + row] =
+                    csmMatrices_[i].m[column * 4 + row];
+            }
+        }
+    }
 
     frame.csmSplits = {
         csmSplits_[0],
