@@ -2038,84 +2038,126 @@ bool VulkanRenderer::CreateDescriptorPoolAndSets() {
 }
 
 bool VulkanRenderer::CreatePipelines() {
-    const VkPipelineShaderStageCreateInfo geometryStages[2] = {
-        {
-            VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-            nullptr,
-            0,
-            VK_SHADER_STAGE_VERTEX_BIT,
-            geometryVert_,
-            "main",
-            nullptr
-        },
-        {
-            VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-            nullptr,
-            0,
-            VK_SHADER_STAGE_FRAGMENT_BIT,
-            geometryFrag_,
-            "main",
-            nullptr
-        }
-    };
+    const VkPipelineShaderStageCreateInfo geometryStages[2] = {{
+        VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+        nullptr,
+        0,
+        VK_SHADER_STAGE_VERTEX_BIT,
+        geometryVert_,
+        "main",
+        nullptr
+    }, {
+        VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+        nullptr,
+        0,
+        VK_SHADER_STAGE_FRAGMENT_BIT,
+        geometryFrag_,
+        "main",
+        nullptr
+    }};
 
     VkVertexInputBindingDescription binding{};
     binding.binding = 0;
     binding.stride = sizeof(DemoVertex);
-    binding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+    binding.inputRate =
+        VK_VERTEX_INPUT_RATE_VERTEX;
 
-    const std::array<VkVertexInputAttributeDescription, 5> attributes = {{
-        {0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(DemoVertex, position)},
-        {1, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(DemoVertex, normal)},
-        {2, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(DemoVertex, uv)},
-        {3, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(DemoVertex, baseColorMetallic)},
-        {4, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(DemoVertex, roughnessAO)}
+    const std::array<
+        VkVertexInputAttributeDescription,
+        5
+    > attributes = {{
+        {
+            0, 0,
+            VK_FORMAT_R32G32B32_SFLOAT,
+            offsetof(DemoVertex, position)
+        },
+        {
+            1, 0,
+            VK_FORMAT_R32G32B32_SFLOAT,
+            offsetof(DemoVertex, normal)
+        },
+        {
+            2, 0,
+            VK_FORMAT_R32G32_SFLOAT,
+            offsetof(DemoVertex, uv)
+        },
+        {
+            3, 0,
+            VK_FORMAT_R32G32B32A32_SFLOAT,
+            offsetof(DemoVertex, baseColorMetallic)
+        },
+        {
+            4, 0,
+            VK_FORMAT_R32G32_SFLOAT,
+            offsetof(DemoVertex, roughnessAO)
+        }
     }};
 
     VkPipelineVertexInputStateCreateInfo vertexInput{
         VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO
     };
+
     vertexInput.vertexBindingDescriptionCount = 1;
     vertexInput.pVertexBindingDescriptions = &binding;
     vertexInput.vertexAttributeDescriptionCount =
         static_cast<uint32_t>(attributes.size());
-    vertexInput.pVertexAttributeDescriptions = attributes.data();
+    vertexInput.pVertexAttributeDescriptions =
+        attributes.data();
 
     VkPipelineInputAssemblyStateCreateInfo inputAssembly{
         VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO
     };
+
     inputAssembly.topology =
         VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 
     VkPipelineViewportStateCreateInfo viewportState{
         VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO
     };
+
     viewportState.viewportCount = 1;
     viewportState.scissorCount = 1;
 
     VkPipelineRasterizationStateCreateInfo rasterization{
         VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO
     };
-    rasterization.polygonMode = VK_POLYGON_MODE_FILL;
-    rasterization.cullMode = VK_CULL_MODE_BACK_BIT;
-    rasterization.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
-    rasterization.lineWidth = 1.0f;
+
+    rasterization.polygonMode =
+        VK_POLYGON_MODE_FILL;
+    rasterization.cullMode =
+        VK_CULL_MODE_BACK_BIT;
+    rasterization.frontFace =
+        VK_FRONT_FACE_COUNTER_CLOCKWISE;
+    rasterization.lineWidth =
+        1.0f;
 
     VkPipelineMultisampleStateCreateInfo multisample{
         VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO
     };
+
     multisample.rasterizationSamples =
         VK_SAMPLE_COUNT_1_BIT;
 
     VkPipelineDepthStencilStateCreateInfo depth{
         VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO
     };
-    depth.depthTestEnable = VK_TRUE;
-    depth.depthWriteEnable = VK_TRUE;
-    depth.depthCompareOp = VK_COMPARE_OP_LESS;
 
-    std::array<VkPipelineColorBlendAttachmentState, 3> gbufferBlend{};
-    for (auto& state : gbufferBlend) {
+    depth.depthTestEnable =
+        VK_TRUE;
+    depth.depthWriteEnable =
+        VK_TRUE;
+    depth.depthCompareOp =
+        VK_COMPARE_OP_LESS;
+
+    std::array<
+        VkPipelineColorBlendAttachmentState,
+        3
+    > gbufferBlend{};
+
+    for (auto& state :
+         gbufferBlend) {
+        state.blendEnable =
+            VK_FALSE;
         state.colorWriteMask =
             VK_COLOR_COMPONENT_R_BIT |
             VK_COLOR_COMPONENT_G_BIT |
@@ -2126,10 +2168,15 @@ bool VulkanRenderer::CreatePipelines() {
     VkPipelineColorBlendStateCreateInfo gbufferBlendState{
         VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO
     };
-    gbufferBlendState.attachmentCount = 3;
-    gbufferBlendState.pAttachments = gbufferBlend.data();
 
-    const std::array<VkDynamicState, 2> dynamicStates = {{
+    gbufferBlendState.attachmentCount = 3;
+    gbufferBlendState.pAttachments =
+        gbufferBlend.data();
+
+    const std::array<
+        VkDynamicState,
+        2
+    > dynamicStates = {{
         VK_DYNAMIC_STATE_VIEWPORT,
         VK_DYNAMIC_STATE_SCISSOR
     }};
@@ -2137,26 +2184,40 @@ bool VulkanRenderer::CreatePipelines() {
     VkPipelineDynamicStateCreateInfo dynamicState{
         VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO
     };
+
     dynamicState.dynamicStateCount = 2;
-    dynamicState.pDynamicStates = dynamicStates.data();
+    dynamicState.pDynamicStates =
+        dynamicStates.data();
 
     VkGraphicsPipelineCreateInfo geometryInfo{
         VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO
     };
 
     geometryInfo.stageCount = 2;
-    geometryInfo.pStages = geometryStages;
-    geometryInfo.pVertexInputState = &vertexInput;
-    geometryInfo.pInputAssemblyState = &inputAssembly;
-    geometryInfo.pViewportState = &viewportState;
-    geometryInfo.pRasterizationState = &rasterization;
-    geometryInfo.pMultisampleState = &multisample;
-    geometryInfo.pDepthStencilState = &depth;
-    geometryInfo.pColorBlendState = &gbufferBlendState;
-    geometryInfo.pDynamicState = &dynamicState;
-    geometryInfo.layout = geometryLayout_;
-    geometryInfo.renderPass = pass_;
-    geometryInfo.subpass = 0;
+    geometryInfo.pStages =
+        geometryStages;
+    geometryInfo.pVertexInputState =
+        &vertexInput;
+    geometryInfo.pInputAssemblyState =
+        &inputAssembly;
+    geometryInfo.pViewportState =
+        &viewportState;
+    geometryInfo.pRasterizationState =
+        &rasterization;
+    geometryInfo.pMultisampleState =
+        &multisample;
+    geometryInfo.pDepthStencilState =
+        &depth;
+    geometryInfo.pColorBlendState =
+        &gbufferBlendState;
+    geometryInfo.pDynamicState =
+        &dynamicState;
+    geometryInfo.layout =
+        geometryLayout_;
+    geometryInfo.renderPass =
+        pass_;
+    geometryInfo.subpass =
+        0;
 
     if (vkCreateGraphicsPipelines(
             device_,
@@ -2164,31 +2225,127 @@ bool VulkanRenderer::CreatePipelines() {
             1,
             &geometryInfo,
             nullptr,
-            &geometryPipeline_) != VK_SUCCESS) {
-        AETHERIS_VK_LOGE("Geometry pipeline creation failed");
+            &geometryPipeline_
+        ) != VK_SUCCESS) {
+        AETHERIS_VK_LOGE(
+            "Geometry pipeline creation failed"
+        );
         return false;
     }
 
-    const VkPipelineShaderStageCreateInfo fullscreenStages[2] = {
-        {
-            VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-            nullptr,
-            0,
-            VK_SHADER_STAGE_VERTEX_BIT,
-            fullscreenVert_,
-            "main",
-            nullptr
-        },
-        {
-            VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-            nullptr,
-            0,
-            VK_SHADER_STAGE_FRAGMENT_BIT,
-            lightingFrag_,
-            "main",
-            nullptr
-        }
+    // Shadow pipeline: depth-only, no fragment color target.
+    const VkPipelineShaderStageCreateInfo shadowStages[2] = {{
+        VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+        nullptr,
+        0,
+        VK_SHADER_STAGE_VERTEX_BIT,
+        shadowVert_,
+        "main",
+        nullptr
+    }, {
+        VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+        nullptr,
+        0,
+        VK_SHADER_STAGE_FRAGMENT_BIT,
+        shadowFrag_,
+        "main",
+        nullptr
+    }};
+
+    const VkVertexInputAttributeDescription shadowAttribute{
+        0,
+        0,
+        VK_FORMAT_R32G32B32_SFLOAT,
+        offsetof(DemoVertex, position)
     };
+
+    VkPipelineVertexInputStateCreateInfo shadowVertexInput{
+        VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO
+    };
+
+    shadowVertexInput.vertexBindingDescriptionCount = 1;
+    shadowVertexInput.pVertexBindingDescriptions =
+        &binding;
+    shadowVertexInput.vertexAttributeDescriptionCount = 1;
+    shadowVertexInput.pVertexAttributeDescriptions =
+        &shadowAttribute;
+
+    VkPipelineRasterizationStateCreateInfo shadowRaster =
+        rasterization;
+    shadowRaster.cullMode =
+        VK_CULL_MODE_FRONT_BIT;
+    shadowRaster.depthBiasEnable =
+        VK_TRUE;
+    shadowRaster.depthBiasConstantFactor =
+        1.25f;
+    shadowRaster.depthBiasSlopeFactor =
+        1.75f;
+
+    VkPipelineColorBlendStateCreateInfo noColorBlend{
+        VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO
+    };
+
+    VkGraphicsPipelineCreateInfo shadowInfo{
+        VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO
+    };
+
+    shadowInfo.stageCount = 2;
+    shadowInfo.pStages =
+        shadowStages;
+    shadowInfo.pVertexInputState =
+        &shadowVertexInput;
+    shadowInfo.pInputAssemblyState =
+        &inputAssembly;
+    shadowInfo.pViewportState =
+        &viewportState;
+    shadowInfo.pRasterizationState =
+        &shadowRaster;
+    shadowInfo.pMultisampleState =
+        &multisample;
+    shadowInfo.pDepthStencilState =
+        &depth;
+    shadowInfo.pColorBlendState =
+        &noColorBlend;
+    shadowInfo.pDynamicState =
+        &dynamicState;
+    shadowInfo.layout =
+        shadowLayout_;
+    shadowInfo.renderPass =
+        shadowPass_;
+    shadowInfo.subpass =
+        0;
+
+    if (vkCreateGraphicsPipelines(
+            device_,
+            resources_.PipelineCache(),
+            1,
+            &shadowInfo,
+            nullptr,
+            &shadowPipeline_
+        ) != VK_SUCCESS) {
+        AETHERIS_VK_LOGE(
+            "CSM shadow pipeline creation failed"
+        );
+        return false;
+    }
+
+    const VkPipelineShaderStageCreateInfo lightingStages[2] = {{
+        VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+        nullptr,
+        0,
+        VK_SHADER_STAGE_VERTEX_BIT,
+        fullscreenVert_,
+        "main",
+        nullptr
+    }, {
+        VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+        nullptr,
+        0,
+        VK_SHADER_STAGE_FRAGMENT_BIT,
+        lightingFrag_,
+        "main",
+        nullptr
+    }};
 
     VkPipelineVertexInputStateCreateInfo noVertexInput{
         VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO
@@ -2196,6 +2353,7 @@ bool VulkanRenderer::CreatePipelines() {
 
     VkPipelineRasterizationStateCreateInfo fullscreenRasterization =
         rasterization;
+
     fullscreenRasterization.cullMode =
         VK_CULL_MODE_NONE;
 
@@ -2213,25 +2371,40 @@ bool VulkanRenderer::CreatePipelines() {
     VkPipelineColorBlendStateCreateInfo oneColorBlend{
         VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO
     };
+
     oneColorBlend.attachmentCount = 1;
-    oneColorBlend.pAttachments = &oneColor;
+    oneColorBlend.pAttachments =
+        &oneColor;
 
     VkGraphicsPipelineCreateInfo lightingInfo{
         VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO
     };
+
     lightingInfo.stageCount = 2;
-    lightingInfo.pStages = fullscreenStages;
-    lightingInfo.pVertexInputState = &noVertexInput;
-    lightingInfo.pInputAssemblyState = &inputAssembly;
-    lightingInfo.pViewportState = &viewportState;
-    lightingInfo.pRasterizationState = &fullscreenRasterization;
-    lightingInfo.pMultisampleState = &multisample;
-    lightingInfo.pDepthStencilState = &noDepth;
-    lightingInfo.pColorBlendState = &oneColorBlend;
-    lightingInfo.pDynamicState = &dynamicState;
-    lightingInfo.layout = lightingLayout_;
-    lightingInfo.renderPass = pass_;
-    lightingInfo.subpass = 1;
+    lightingInfo.pStages =
+        lightingStages;
+    lightingInfo.pVertexInputState =
+        &noVertexInput;
+    lightingInfo.pInputAssemblyState =
+        &inputAssembly;
+    lightingInfo.pViewportState =
+        &viewportState;
+    lightingInfo.pRasterizationState =
+        &fullscreenRasterization;
+    lightingInfo.pMultisampleState =
+        &multisample;
+    lightingInfo.pDepthStencilState =
+        &noDepth;
+    lightingInfo.pColorBlendState =
+        &oneColorBlend;
+    lightingInfo.pDynamicState =
+        &dynamicState;
+    lightingInfo.layout =
+        lightingLayout_;
+    lightingInfo.renderPass =
+        pass_;
+    lightingInfo.subpass =
+        1;
 
     if (vkCreateGraphicsPipelines(
             device_,
@@ -2239,63 +2412,132 @@ bool VulkanRenderer::CreatePipelines() {
             1,
             &lightingInfo,
             nullptr,
-            &lightingPipeline_) != VK_SUCCESS) {
-        AETHERIS_VK_LOGE("Deferred lighting pipeline creation failed");
+            &lightingPipeline_
+        ) != VK_SUCCESS) {
+        AETHERIS_VK_LOGE(
+            "Deferred lighting pipeline creation failed"
+        );
         DestroyPipelines();
         return false;
     }
 
-    const VkPipelineShaderStageCreateInfo postStages[2] = {
-        {
-            VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-            nullptr,
-            0,
-            VK_SHADER_STAGE_VERTEX_BIT,
-            fullscreenVert_,
-            "main",
-            nullptr
-        },
-        {
-            VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-            nullptr,
-            0,
-            VK_SHADER_STAGE_FRAGMENT_BIT,
-            postFrag_,
-            "main",
-            nullptr
-        }
-    };
+    // Bloom downsample / upsample are kept at half-resolution to reduce
+    // bandwidth and fragment work on Mali and Adreno.
+    const VkPipelineShaderStageCreateInfo downStages[2] = {{
+        VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+        nullptr,
+        0,
+        VK_SHADER_STAGE_VERTEX_BIT,
+        fullscreenVert_,
+        "main",
+        nullptr
+    }, {
+        VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+        nullptr,
+        0,
+        VK_SHADER_STAGE_FRAGMENT_BIT,
+        bloomDownFrag_,
+        "main",
+        nullptr
+    }};
 
-    VkGraphicsPipelineCreateInfo postInfo{
+    VkGraphicsPipelineCreateInfo downInfo{
         VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO
     };
-    postInfo.stageCount = 2;
-    postInfo.pStages = postStages;
-    postInfo.pVertexInputState = &noVertexInput;
-    postInfo.pInputAssemblyState = &inputAssembly;
-    postInfo.pViewportState = &viewportState;
-    postInfo.pRasterizationState = &fullscreenRasterization;
-    postInfo.pMultisampleState = &multisample;
-    postInfo.pDepthStencilState = &noDepth;
-    postInfo.pColorBlendState = &oneColorBlend;
-    postInfo.pDynamicState = &dynamicState;
-    postInfo.layout = postLayout_;
-    postInfo.renderPass = postPass_;
-    postInfo.subpass = 0;
+
+    downInfo.stageCount = 2;
+    downInfo.pStages = downStages;
+    downInfo.pVertexInputState = &noVertexInput;
+    downInfo.pInputAssemblyState = &inputAssembly;
+    downInfo.pViewportState = &viewportState;
+    downInfo.pRasterizationState = &fullscreenRasterization;
+    downInfo.pMultisampleState = &multisample;
+    downInfo.pDepthStencilState = &noDepth;
+    downInfo.pColorBlendState = &oneColorBlend;
+    downInfo.pDynamicState = &dynamicState;
+    downInfo.layout = postLayout_;
+    downInfo.renderPass = bloomDownPass_;
+    downInfo.subpass = 0;
 
     if (vkCreateGraphicsPipelines(
             device_,
             resources_.PipelineCache(),
             1,
-            &postInfo,
+            &downInfo,
             nullptr,
-            &postPipeline_) != VK_SUCCESS) {
-        AETHERIS_VK_LOGE("Post pipeline creation failed");
-        DestroyPipelines();
+            &bloomDownPipeline_
+        ) != VK_SUCCESS) {
         return false;
     }
 
-    return true;
+    const VkPipelineShaderStageCreateInfo upStages[2] = {{
+        VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+        nullptr,
+        0,
+        VK_SHADER_STAGE_VERTEX_BIT,
+        fullscreenVert_,
+        "main",
+        nullptr
+    }, {
+        VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+        nullptr,
+        0,
+        VK_SHADER_STAGE_FRAGMENT_BIT,
+        bloomUpFrag_,
+        "main",
+        nullptr
+    }};
+
+    VkGraphicsPipelineCreateInfo upInfo = downInfo;
+    upInfo.pStages = upStages;
+    upInfo.renderPass =
+        bloomUpPass_;
+
+    if (vkCreateGraphicsPipelines(
+            device_,
+            resources_.PipelineCache(),
+            1,
+            &upInfo,
+            nullptr,
+            &bloomUpPipeline_
+        ) != VK_SUCCESS) {
+        return false;
+    }
+
+    const VkPipelineShaderStageCreateInfo postStages[2] = {{
+        VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+        nullptr,
+        0,
+        VK_SHADER_STAGE_VERTEX_BIT,
+        fullscreenVert_,
+        "main",
+        nullptr
+    }, {
+        VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+        nullptr,
+        0,
+        VK_SHADER_STAGE_FRAGMENT_BIT,
+        postFrag_,
+        "main",
+        nullptr
+    }};
+
+    VkGraphicsPipelineCreateInfo postInfo = downInfo;
+    postInfo.pStages =
+        postStages;
+    postInfo.layout =
+        postLayout_;
+    postInfo.renderPass =
+        postPass_;
+
+    return vkCreateGraphicsPipelines(
+        device_,
+        resources_.PipelineCache(),
+        1,
+        &postInfo,
+        nullptr,
+        &postPipeline_
+    ) == VK_SUCCESS;
 }
 
 bool VulkanRenderer::CreateOneTimeCommand(
