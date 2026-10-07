@@ -6536,6 +6536,37 @@ bool VulkanRenderer::CreateCSMResources() {
     return true;
 }
 
+bool VulkanRenderer::CreateSSAOTarget() {
+    ssaoExtent_ = {
+        std::max(1u, extent_.width / 2u),
+        std::max(1u, extent_.height / 2u)
+    };
+
+    return
+        CreateImageRaw(
+            ssaoFormat_,
+            VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+                VK_IMAGE_USAGE_SAMPLED_BIT,
+            0,
+            {
+                ssaoExtent_.width,
+                ssaoExtent_.height,
+                1
+            },
+            1,
+            ssaoImage_,
+            ssaoMemory_
+        ) &&
+        CreateImageViewRaw(
+            ssaoImage_,
+            ssaoFormat_,
+            VK_IMAGE_VIEW_TYPE_2D,
+            VK_IMAGE_ASPECT_COLOR_BIT,
+            1,
+            ssaoView_
+        );
+}
+
 bool VulkanRenderer::CreateBloomResources() {
     bloomExtent_ = {
         std::max(
