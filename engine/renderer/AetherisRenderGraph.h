@@ -66,6 +66,8 @@ public:
         ResourceHandle resource{};
         VkImageMemoryBarrier image{};
         VkBufferMemoryBarrier buffer{};
+        VkPipelineStageFlags srcStage{VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT};
+        VkPipelineStageFlags dstStage{VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT};
         bool isImage{true};
     };
 
