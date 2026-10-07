@@ -336,16 +336,71 @@ uint32_t VulkanRenderer::FindMemoryType(uint32_t typeBits, VkMemoryPropertyFlags
         if((typeBits&(1u<<i))&&(memory.memoryTypes[i].propertyFlags&properties)==properties)return i;
     return UINT32_MAX;
 }
-bool VulkanRenderer::CreateAttachmentImage(VkFormat format,VkImageUsageFlags usage,VkImage& image,VkDeviceMemory& memory,VkImageView& view,VkImageAspectFlags aspect){
-    VkImageCreateInfo ci{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};ci.imageType=VK_IMAGE_TYPE_2D;ci.format=format;ci.extent={extent_.width,extent_.height,1};ci.mipLevels=1;ci.arrayLayers=1;ci.samples=VK_SAMPLE_COUNT_1_BIT;ci.tiling=VK_IMAGE_TILING_OPTIMAL;ci.usage=usage;ci.initialLayout=VK_IMAGE_LAYOUT_UNDEFINED;
-    if(vkCreateImage(device_,&ci,nullptr,&image)!=VK_SUCCESS)return false;VkMemoryRequirements req{};vkGetImageMemoryRequirements(device_,image,&req);
-    uint32_t mt=FindMemoryType(req.memoryTypeBits,VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT|VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT);if(mt==UINT32_MAX)mt=FindMemoryType(req.memoryTypeBits,VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+bool VulkanRenderer::CreateAttachmentImage(
+    VkFormat format,
+    VkImageUsageFlags usage,
+    VkImage& image,
+    VkDeviceMemory& memory,
+    VkImageView& view,
+    VkImageAspectFlags aspect)
+{
+    VkImageCreateInfo ci{
+        VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO
+    };
+
+    ci.imageType = VK_IMAGE_TYPE_2D;
+    ci.format = format;
+    ci.extent = {
+        extent_.width,
+        extent_.height,
+        1
+    };
+    ci.mipLevels = 1;
+    ci.arrayLayers = 1;
+    ci.samples = VK_SAMPLE_COUNT_1_BIT;
+    ci.tiling = VK_IMAGE_TILING_OPTIMAL;
+    ci.usage = usage;
+    ci.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+    if (vkCreateImage(
+            device_,
+            &ci,
+            nullptr,
+            &image) != VK_SUCCESS)
+        return false;
+
+    VkMemoryRequirements req{};
+    vkGetImageMemoryRequirements(
+        device_,
+        image,
+        &req
+    );
+
+    uint32_t mt = UINT32_MAX;
+
+    if ((usage & VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT) != 0) {
+        mt = FindMemoryType(
+            req.memoryTypeBits,
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT |
+                VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT
+        );
+    }
+
+    if (mt == UINT32_MAX) {
+        mt = FindMemoryType(
+            req.memoryTypeBits,
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+        );
+    }
     if(mt==UINT32_MAX){vkDestroyImage(device_,image,nullptr);image={};return false;}VkMemoryAllocateInfo ai{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};ai.allocationSize=req.size;ai.memoryTypeIndex=mt;
     if(vkAllocateMemory(device_,&ai,nullptr,&memory)!=VK_SUCCESS){vkDestroyImage(device_,image,nullptr);image={};return false;}if(vkBindImageMemory(device_,image,memory,0)!=VK_SUCCESS){vkFreeMemory(device_,memory,nullptr);vkDestroyImage(device_,image,nullptr);memory={};image={};return false;}
     VkImageViewCreateInfo vi{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};vi.image=image;vi.viewType=VK_IMAGE_VIEW_TYPE_2D;vi.format=format;vi.subresourceRange={aspect,0,1,0,1};if(vkCreateImageView(device_,&vi,nullptr,&view)!=VK_SUCCESS){vkFreeMemory(device_,memory,nullptr);vkDestroyImage(device_,image,nullptr);memory={};image={};return false;}return true;
 }
 bool VulkanRenderer::CreateGBufferAttachments(){
-    const VkImageUsageFlags u=VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT|VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT|VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT;
+    const VkImageUsageFlags u =
+        VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+        VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT |
+        VK_IMAGE_USAGE_SAMPLED_BIT;
     if(!CreateAttachmentImage(VK_FORMAT_R16G16B16A16_SFLOAT,u,gbufferImages_[0],gbufferMemory_[0],gbufferViews_[0],VK_IMAGE_ASPECT_COLOR_BIT)||
        !CreateAttachmentImage(VK_FORMAT_A2B10G10R10_UNORM_PACK32,u,gbufferImages_[1],gbufferMemory_[1],gbufferViews_[1],VK_IMAGE_ASPECT_COLOR_BIT)||
        !CreateAttachmentImage(VK_FORMAT_R8G8B8A8_UNORM,u,gbufferImages_[2],gbufferMemory_[2],gbufferViews_[2],VK_IMAGE_ASPECT_COLOR_BIT)){DestroyGBufferAttachments();return false;}
@@ -1057,6 +1112,9 @@ void VulkanRenderer::DrawRenderQueue(
     if(!begun_ || frameRecorded_)
         return;
 
+    if (!UpdateFrameUniforms())
+        return;
+
     if(!RecordShadowMaps(
             queue,
             transforms
@@ -1075,7 +1133,7 @@ void VulkanRenderer::DrawRenderQueue(
     // ------------------------------------------------------------
     VkClearValue geometryClears[4]{};
     geometryClears[0].color =
-        {{0.0f,0.0f,0.0f,0.0f}};
+        {{0.0f,0.0f,0.0f,-1.0f}};
     geometryClears[1].color =
         {{0.5f,0.5f,1.0f,1.0f}};
     geometryClears[2].color =
@@ -1248,6 +1306,65 @@ void VulkanRenderer::DrawRenderQueue(
         frame.cmd
     );
 
+    // Geometry render pass -> sampled G-buffer/Depth.
+    VkImageMemoryBarrier geometryToShader[4]{};
+
+    for (uint32_t i=0;i<3;++i) {
+        geometryToShader[i] = {
+            VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER
+        };
+        geometryToShader[i].srcAccessMask =
+            VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+        geometryToShader[i].dstAccessMask =
+            VK_ACCESS_SHADER_READ_BIT;
+        geometryToShader[i].oldLayout =
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        geometryToShader[i].newLayout =
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        geometryToShader[i].srcQueueFamilyIndex =
+            VK_QUEUE_FAMILY_IGNORED;
+        geometryToShader[i].dstQueueFamilyIndex =
+            VK_QUEUE_FAMILY_IGNORED;
+        geometryToShader[i].image =
+            gbufferImages_[i];
+        geometryToShader[i].subresourceRange = {
+            VK_IMAGE_ASPECT_COLOR_BIT,0,1,0,1
+        };
+    }
+
+    geometryToShader[3] = {
+        VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER
+    };
+    geometryToShader[3].srcAccessMask =
+        VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    geometryToShader[3].dstAccessMask =
+        VK_ACCESS_SHADER_READ_BIT;
+    geometryToShader[3].oldLayout =
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    geometryToShader[3].newLayout =
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    geometryToShader[3].srcQueueFamilyIndex =
+        VK_QUEUE_FAMILY_IGNORED;
+    geometryToShader[3].dstQueueFamilyIndex =
+        VK_QUEUE_FAMILY_IGNORED;
+    geometryToShader[3].image =
+        depthImage_;
+    geometryToShader[3].subresourceRange = {
+        VK_IMAGE_ASPECT_DEPTH_BIT,0,1,0,1
+    };
+
+    vkCmdPipelineBarrier(
+        frame.cmd,
+        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
+            VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
+        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+        0,
+        0,nullptr,
+        0,nullptr,
+        4,
+        geometryToShader
+    );
+
     // ------------------------------------------------------------
     // 2. Mobile SSAO
     // ------------------------------------------------------------
@@ -1340,6 +1457,39 @@ void VulkanRenderer::DrawRenderQueue(
 
     vkCmdEndRenderPass(
         frame.cmd
+    );
+
+    VkImageMemoryBarrier ssaoToLighting{
+        VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER
+    };
+
+    ssaoToLighting.srcAccessMask =
+        VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    ssaoToLighting.dstAccessMask =
+        VK_ACCESS_SHADER_READ_BIT;
+    ssaoToLighting.oldLayout =
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    ssaoToLighting.newLayout =
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    ssaoToLighting.srcQueueFamilyIndex =
+        VK_QUEUE_FAMILY_IGNORED;
+    ssaoToLighting.dstQueueFamilyIndex =
+        VK_QUEUE_FAMILY_IGNORED;
+    ssaoToLighting.image =
+        ssaoImage_;
+    ssaoToLighting.subresourceRange = {
+        VK_IMAGE_ASPECT_COLOR_BIT,0,1,0,1
+    };
+
+    vkCmdPipelineBarrier(
+        frame.cmd,
+        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+        0,
+        0,nullptr,
+        0,nullptr,
+        1,
+        &ssaoToLighting
     );
 
     // ------------------------------------------------------------
