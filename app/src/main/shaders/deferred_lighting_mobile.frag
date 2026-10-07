@@ -483,7 +483,11 @@ void main()
         vec4 farPoint =
             F.InvViewProj *
             vec4(
-                uv * 2.0 - 1.0,
+                clamp(
+                    uv,
+                    vec2(0.0),
+                    vec2(1.0)
+                ) * 2.0 - 1.0,
                 1.0,
                 1.0
             );
@@ -678,12 +682,26 @@ void main()
         kd *
         albedo;
 
+    float maxPrefilterMip =
+        clamp(
+            F.CsmSplits.w,
+            0.0,
+            15.0
+        );
+
+    float prefilterMip =
+        clamp(
+            roughness *
+            maxPrefilterMip,
+            0.0,
+            maxPrefilterMip
+        );
+
     vec3 prefiltered =
         textureLod(
             PrefilteredEnv,
-            R,
-            roughness *
-            F.CsmSplits.w
+            normalize(R),
+            prefilterMip
         ).rgb;
 
     vec2 brdf =
