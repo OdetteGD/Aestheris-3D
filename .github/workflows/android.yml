@@ -2,10 +2,16 @@ name: Aetheris Engine Android CI/CD
 
 on:
   push:
-    branches: [main, master]
+    branches: [main, master, feature/aetheris-mobile-render-core]
   pull_request:
     branches: [main, master]
   workflow_dispatch:
+    inputs:
+      clean_native:
+        description: "Recreate app/.cxx before building"
+        required: false
+        default: true
+        type: boolean
 
 env:
   JAVA_VERSION: "17"
@@ -90,6 +96,78 @@ jobs:
           "${NDK_HOME}/ndk-build" --version
           "${CMAKE_HOME}/bin/cmake" --version
 
+      - name: Set up .NET 10 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Build Aestheris C# SDK and stage Mono runtime
+        shell: bash
+        env:
+          DOTNET_MONO_RUNTIME_VERSION: "10.0.12"
+        run: |
+          set -euo pipefail
+
+          dotnet --info
+          dotnet build csharp/AestherisCore.csproj \
+            --configuration Release \
+            --nologo \
+            --warnaserror
+
+          test -s csharp/bin/Release/net10.0/AestherisCore.dll
+          mkdir -p app/src/main/assets/csharp/sdk
+          cp csharp/bin/Release/net10.0/AestherisCore.dll \
+             app/src/main/assets/csharp/sdk/AestherisCore.dll
+
+          rm -rf app/src/main/jniLibs/arm64-v8a app/src/main/jniLibs/armeabi-v7a
+          mkdir -p app/src/main/jniLibs/arm64-v8a
+          mkdir -p app/src/main/jniLibs/armeabi-v7a
+
+          stage_mono_runtime() {
+            local rid="$1"
+            local abi_dir="$2"
+            local package_id="microsoft.netcore.app.runtime.mono.${rid}"
+            local temp_dir
+            temp_dir="$(mktemp -d)"
+
+            pushd "${temp_dir}" >/dev/null
+            dotnet new classlib --framework net10.0 --no-restore --force >/dev/null
+            dotnet add package "Microsoft.NETCore.App.Runtime.Mono.${rid}" \
+              --version "${DOTNET_MONO_RUNTIME_VERSION}" \
+              --no-restore >/dev/null
+            dotnet restore --nologo >/dev/null
+            popd >/dev/null
+
+            local package_root=
+            package_root="$(find "${HOME}/.nuget/packages/${package_id}" \
+              -maxdepth 2 -mindepth 2 -type d \
+              -name "${DOTNET_MONO_RUNTIME_VERSION}" \
+              -print -quit)"
+
+            test -n "${package_root}"
+            test -d "${package_root}/runtimes/${rid}/native"
+
+            mapfile -t native_libs < <(
+              find "${package_root}/runtimes/${rid}/native" \
+                -maxdepth 1 -type f -name "*.so" -print | sort
+            )
+
+            test "${#native_libs[@]}" -gt 0
+
+            for native_lib in "${native_libs[@]}"; do
+              cp "${native_lib}" "app/src/main/jniLibs/${abi_dir}/"
+            done
+
+            test -s "app/src/main/jniLibs/${abi_dir}/libmonosgen-2.0.so"
+            rm -rf "${temp_dir}"
+          }
+
+          stage_mono_runtime "android-arm64" "arm64-v8a"
+          stage_mono_runtime "android-arm" "armeabi-v7a"
+
+          echo "Staged C# SDK: app/src/main/assets/csharp/sdk/AestherisCore.dll"
+          find app/src/main/jniLibs -maxdepth 2 -type f -name "*.so" -print | sort
+
       # The repository now contains a self-bootstrapping Gradle wrapper.
       - name: Make Gradle wrapper executable
         shell: bash
@@ -152,11 +230,21 @@ jobs:
           grep -F "EnsureDeferredResources()" engine/renderer/IAetherisRenderer.h
           grep -F "AbortDeferredResources()" engine/renderer/IAetherisRenderer.h
           grep -F "RecordSafeClear()" engine/renderer/VulkanRenderer.cpp
-          grep -F "AetherisEngine_Fatal" android/JniBridge.cpp
+          grep -F "AetherisEditor_GLES" android/JniBridge.cpp
+          grep -F "CSharpScriptEngine.cpp" CMakeLists.txt
+          grep -F "nativeTouch" android/JniBridge.cpp
           test -f app/src/main/assets/fallback_shaders/ssao_mobile_es300.glsl
+          test -f csharp/AestherisCore.csproj
+          test -f csharp/PlayerController.cs
           test ! -f app/src/main/shaders/ssao_mobile_es300.frag
 
+          grep -F "set(CMAKE_CXX_STANDARD 20)" CMakeLists.txt
           grep -F "target_compile_features(aetheris3d PRIVATE cxx_std_20)" CMakeLists.txt
+
+      - name: Apply requested native clean build
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.clean_native }}
+        shell: bash
+        run: rm -rf app/.cxx
 
       # Build the production release. Retry transient Gradle/SDK cache failures,
       # while still failing deterministically after the final compiler attempt.

@@ -2,6 +2,7 @@
 #include <android/log.h>
 #include <android/native_window_jni.h>
 #include "engine/core/EngineCore.h"
+#include "engine/scripting/CSharpScriptEngine.h"
 #include <cinttypes>
 #include <source_location>
 #include <unwind.h>
@@ -235,6 +236,22 @@ Java_com_aetheris_engine_AetherisNative_nativeGizmo(
             ? aetheris::GizmoCommand::Type::Rotate
             : aetheris::GizmoCommand::Type::Scale;
     aetheris::EngineCore::Instance().ApplyGizmo(command);
+}
+
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_aetheris_engine_AetherisNative_nativeTouch(
+    JNIEnv*,
+    jclass,
+    jint action,
+    jfloat x,
+    jfloat y
+) {
+    aetheris::CSharpScriptEngine::SetTouchStateFromJNI(
+        static_cast<int32_t>(action),
+        static_cast<float>(x),
+        static_cast<float>(y)
+    );
 }
 
 extern "C" JNIEXPORT void JNICALL

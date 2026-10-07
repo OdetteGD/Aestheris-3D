@@ -17,6 +17,7 @@ add_library(aetheris3d SHARED
     engine/renderer/VulkanRenderer.cpp
     engine/renderer/OfflineEnvironment.cpp
     engine/renderer/GLES3Renderer.cpp
+    engine/scripting/CSharpScriptEngine.cpp
     engine/renderer/AetherisValidationTracker.cpp
     engine/world/SceneNode.cpp
     engine/editor/EditorRaycast.cpp
@@ -62,6 +63,7 @@ target_compile_options(aetheris3d PRIVATE
     -Wconversion
     -Wshadow
     -Werror=return-type
+    -Wno-error=deprecated-declarations
     -O3
     -flto
     -fvisibility=hidden

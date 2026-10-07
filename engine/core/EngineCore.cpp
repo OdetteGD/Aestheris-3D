@@ -2,6 +2,7 @@
 #include "engine/renderer/VulkanRenderer.h"
 #include "engine/renderer/GLES3Renderer.h"
 #include "engine/core/AetherisLog.h"
+#include "engine/scripting/CSharpScriptEngine.h"
 
 #include <android/log.h>
 #include <array>
@@ -161,6 +162,8 @@ void EngineCore::RenderOneFrameLocked() {
         return;
 
     frameActive_ = true;
+
+    CSharpScriptEngine::Instance().Update(1.0f / 60.0f);
 
     activeRenderer_->DrawRenderQueue(
         RenderQueue(
@@ -333,6 +336,7 @@ void EngineCore::SetProjectRoot(const std::filesystem::path& root) {
     std::scoped_lock lock(mutex_);
     if (activeRenderer_ || frameActive_) return;
     projectRoot_ = root;
+    CSharpScriptEngine::Instance().Initialize(projectRoot_);
 }
 
 void EngineCore::OnSurfaceChanged(
@@ -457,6 +461,65 @@ void EngineCore::OnSurfaceDestroyed() noexcept {
         activeRenderer_->ReleaseSurface();
 }
 
+bool EngineCore::SetNodePosition(
+    uint64_t nodeHandle,
+    const Vec4& position
+) noexcept {
+    std::scoped_lock lock(mutex_);
+    if (nodeHandle == 0u) return false;
+    const uint64_t index = nodeHandle - 1ull;
+    if (index >= scene_.transforms.size()) return false;
+    scene_.transforms[static_cast<size_t>(index)].position = position;
+    ++scene_.revision;
+    return true;
+}
+
+bool EngineCore::SetNodeRotation(
+    uint64_t nodeHandle,
+    const Vec4& rotation
+) noexcept {
+    std::scoped_lock lock(mutex_);
+    if (nodeHandle == 0u) return false;
+    const uint64_t index = nodeHandle - 1ull;
+    if (index >= scene_.transforms.size()) return false;
+    scene_.transforms[static_cast<size_t>(index)].rotation = rotation;
+    ++scene_.revision;
+    return true;
+}
+
+bool EngineCore::SetNodeScale(
+    uint64_t nodeHandle,
+    const Vec4& scale
+) noexcept {
+    std::scoped_lock lock(mutex_);
+    if (nodeHandle == 0u) return false;
+    const uint64_t index = nodeHandle - 1ull;
+    if (index >= scene_.transforms.size()) return false;
+    scene_.transforms[static_cast<size_t>(index)].scale = scale;
+    ++scene_.revision;
+    return true;
+}
+
+bool EngineCore::GetNodePosition(
+    uint64_t nodeHandle,
+    Vec4& outPosition
+) const noexcept {
+    std::scoped_lock lock(mutex_);
+    if (nodeHandle == 0u) return false;
+    const uint64_t index = nodeHandle - 1ull;
+    if (index >= scene_.transforms.size()) return false;
+    outPosition = scene_.transforms[static_cast<size_t>(index)].position;
+    return true;
+}
+
+uint64_t EngineCore::GetNodeHandle(
+    uint32_t entityIndex
+) const noexcept {
+    std::scoped_lock lock(mutex_);
+    if (entityIndex >= scene_.transforms.size()) return 0ull;
+    return static_cast<uint64_t>(entityIndex) + 1ull;
+}
+
 void EngineCore::ApplyGizmo(const GizmoCommand& c) {
     std::scoped_lock lock(mutex_);
     if (c.entity >= scene_.transforms.size()) return;
@@ -498,6 +561,8 @@ void EngineCore::Shutdown() noexcept {
         activeRenderer_->Shutdown();
         activeRenderer_.reset();
     }
+
+    CSharpScriptEngine::Instance().Shutdown();
 
     demoWorldInitialized_ = false;
     scene_.renderItems.clear();

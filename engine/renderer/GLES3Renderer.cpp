@@ -1344,11 +1344,16 @@ bool GLES3Renderer::EnsureOffscreen(
     uint32_t width,
     uint32_t height
 ) {
-    if (width == 0u || height == 0u) return false;
-    if (offscreenFbo_ && offscreenWidth_ == width && offscreenHeight_ == height) {
-        glBindFramebuffer(GL_FRAMEBUFFER, offscreenFbo_);
-        if (!validator_.IsPassValid(AetherisValidationTracker::Pass::Offscreen))
-            validator_.RecoverPass(AetherisValidationTracker::Pass::Offscreen);
+    if (width == 0u || height == 0u)
+        return false;
+
+    if (offscreenFbo_ &&
+        offscreenWidth_ == width &&
+        offscreenHeight_ == height) {
+        glBindFramebuffer(
+            GL_FRAMEBUFFER,
+            offscreenFbo_
+        );
         return validator_.ValidateFramebuffer(
             offscreenFbo_,
             AetherisValidationTracker::Pass::Offscreen,
@@ -1360,25 +1365,63 @@ bool GLES3Renderer::EnsureOffscreen(
     GLuint newColor = 0u;
     GLuint newDepth = 0u;
 
+    auto discardNewTarget = [&]() noexcept {
+        if (newDepth)
+            glDeleteRenderbuffers(1, &newDepth);
+        if (newColor)
+            glDeleteTextures(1, &newColor);
+        if (newFbo)
+            glDeleteFramebuffers(1, &newFbo);
+
+        newDepth = 0u;
+        newColor = 0u;
+        newFbo = 0u;
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    };
+
     glGenFramebuffers(1, &newFbo);
     if (!validator_.ValidateAllocation(
             AetherisValidationTracker::Kind::Framebuffer,
             "editor_offscreen_fbo",
-            newFbo))
+            newFbo)) {
+        discardNewTarget();
         return false;
+    }
 
     glGenTextures(1, &newColor);
     if (!validator_.ValidateAllocation(
             AetherisValidationTracker::Kind::Texture,
             "editor_offscreen_color",
-            newColor))
-        goto fail;
+            newColor)) {
+        discardNewTarget();
+        validator_.IsolatePass(
+            AetherisValidationTracker::Pass::Offscreen,
+            "offscreen_color_allocation"
+        );
+        return false;
+    }
 
     glBindTexture(GL_TEXTURE_2D, newColor);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(
+        GL_TEXTURE_2D,
+        GL_TEXTURE_MIN_FILTER,
+        GL_LINEAR
+    );
+    glTexParameteri(
+        GL_TEXTURE_2D,
+        GL_TEXTURE_MAG_FILTER,
+        GL_LINEAR
+    );
+    glTexParameteri(
+        GL_TEXTURE_2D,
+        GL_TEXTURE_WRAP_S,
+        GL_CLAMP_TO_EDGE
+    );
+    glTexParameteri(
+        GL_TEXTURE_2D,
+        GL_TEXTURE_WRAP_T,
+        GL_CLAMP_TO_EDGE
+    );
     glTexImage2D(
         GL_TEXTURE_2D,
         0,
@@ -1393,17 +1436,24 @@ bool GLES3Renderer::EnsureOffscreen(
 
     if (!validator_.ValidateGlError(
             AetherisValidationTracker::Pass::Offscreen,
-            "offscreen_color_storage"))
-        goto fail;
+            "offscreen_color_storage")) {
+        discardNewTarget();
+        return false;
+    }
 
     glGenRenderbuffers(1, &newDepth);
     if (!validator_.ValidateAllocation(
             AetherisValidationTracker::Kind::Renderbuffer,
             "editor_offscreen_depth_stencil",
-            newDepth))
-        goto fail;
+            newDepth)) {
+        discardNewTarget();
+        return false;
+    }
 
-    glBindRenderbuffer(GL_RENDERBUFFER, newDepth);
+    glBindRenderbuffer(
+        GL_RENDERBUFFER,
+        newDepth
+    );
     glRenderbufferStorage(
         GL_RENDERBUFFER,
         GL_DEPTH24_STENCIL8,
@@ -1413,10 +1463,15 @@ bool GLES3Renderer::EnsureOffscreen(
 
     if (!validator_.ValidateGlError(
             AetherisValidationTracker::Pass::Offscreen,
-            "offscreen_depth24_stencil8"))
-        goto fail;
+            "offscreen_depth24_stencil8")) {
+        discardNewTarget();
+        return false;
+    }
 
-    glBindFramebuffer(GL_FRAMEBUFFER, newFbo);
+    glBindFramebuffer(
+        GL_FRAMEBUFFER,
+        newFbo
+    );
     glFramebufferTexture2D(
         GL_FRAMEBUFFER,
         GL_COLOR_ATTACHMENT0,
@@ -1430,85 +1485,163 @@ bool GLES3Renderer::EnsureOffscreen(
         GL_RENDERBUFFER,
         newDepth
     );
-    glDrawBuffers(1, std::array<GLenum,1>{GL_COLOR_ATTACHMENT0}.data());
+
+    const GLenum colorAttachment =
+        GL_COLOR_ATTACHMENT0;
+    glDrawBuffers(
+        1,
+        &colorAttachment
+    );
 
     if (!validator_.ValidateFramebuffer(
             newFbo,
             AetherisValidationTracker::Pass::Offscreen,
-            "editor_offscreen_fbo"))
-        goto fail;
+            "editor_offscreen_fbo")) {
+        discardNewTarget();
 
-    {
-        GLuint oldFbo = offscreenFbo_;
-        GLuint oldColor = offscreenColor_;
-        GLuint oldDepth = offscreenDepthStencil_;
+        if (offscreenFbo_) {
+            glBindFramebuffer(
+                GL_FRAMEBUFFER,
+                offscreenFbo_
+            );
+            validator_.RecoverPass(
+                AetherisValidationTracker::Pass::Offscreen
+            );
+            __android_log_print(
+                ANDROID_LOG_WARN,
+                kLogTag,
+                "offscreen FBO replacement rejected; previous target retained"
+            );
+        } else {
+            glBindFramebuffer(
+                GL_FRAMEBUFFER,
+                0
+            );
+        }
 
-        offscreenFbo_ = newFbo;
-        offscreenColor_ = newColor;
-        offscreenDepthStencil_ = newDepth;
-        offscreenWidth_ = width;
-        offscreenHeight_ = height;
-
-        if (oldFbo) glDeleteFramebuffers(1, &oldFbo);
-        if (oldColor) glDeleteTextures(1, &oldColor);
-        if (oldDepth) glDeleteRenderbuffers(1, &oldDepth);
+        return false;
     }
 
-    glBindFramebuffer(GL_FRAMEBUFFER, offscreenFbo_);
+    const GLuint oldFbo =
+        offscreenFbo_;
+    const GLuint oldColor =
+        offscreenColor_;
+    const GLuint oldDepth =
+        offscreenDepthStencil_;
+
+    offscreenFbo_ = newFbo;
+    offscreenColor_ = newColor;
+    offscreenDepthStencil_ = newDepth;
+    offscreenWidth_ = width;
+    offscreenHeight_ = height;
+
+    if (oldFbo)
+        glDeleteFramebuffers(1, &oldFbo);
+    if (oldColor)
+        glDeleteTextures(1, &oldColor);
+    if (oldDepth)
+        glDeleteRenderbuffers(1, &oldDepth);
+
+    glBindFramebuffer(
+        GL_FRAMEBUFFER,
+        offscreenFbo_
+    );
     return true;
-
-fail:
-    if (newDepth) glDeleteRenderbuffers(1, &newDepth);
-    if (newColor) glDeleteTextures(1, &newColor);
-    if (newFbo) glDeleteFramebuffers(1, &newFbo);
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
-    if (offscreenFbo_ != 0u) {
-        // Transactional resize failed: keep the previous complete FBO alive.
-        validator_.RecoverPass(AetherisValidationTracker::Pass::Offscreen);
-        __android_log_print(
-            ANDROID_LOG_WARN,
-            kLogTag,
-            "offscreen resize failed; retaining previous valid target %ux%u",
-            offscreenWidth_,
-            offscreenHeight_
-        );
-    } else {
-        validator_.IsolatePass(
-            AetherisValidationTracker::Pass::Offscreen,
-            "offscreen_allocation"
-        );
-    }
-    return false;
 }
 
 bool GLES3Renderer::EnsureShadowTarget() {
-    if (shadowFbo_ && shadowDepth_)
-        return validator_.IsPassValid(AetherisValidationTracker::Pass::Shadow);
+    if (shadowFbo_ &&
+        shadowDepth_) {
+        glBindFramebuffer(
+            GL_FRAMEBUFFER,
+            shadowFbo_
+        );
+        return validator_.ValidateFramebuffer(
+            shadowFbo_,
+            AetherisValidationTracker::Pass::Shadow,
+            "shadow_fbo_revalidate"
+        );
+    }
 
     GLuint newFbo = 0u;
     GLuint newDepth = 0u;
 
-    glGenFramebuffers(1, &newFbo);
+    auto discardNewTarget = [&]() noexcept {
+        if (newDepth)
+            glDeleteTextures(1, &newDepth);
+        if (newFbo)
+            glDeleteFramebuffers(1, &newFbo);
+
+        newDepth = 0u;
+        newFbo = 0u;
+        glBindFramebuffer(
+            GL_FRAMEBUFFER,
+            0
+        );
+    };
+
+    glGenFramebuffers(
+        1,
+        &newFbo
+    );
     if (!validator_.ValidateAllocation(
             AetherisValidationTracker::Kind::Framebuffer,
             "shadow_fbo",
-            newFbo))
+            newFbo)) {
+        discardNewTarget();
         return false;
+    }
 
-    glGenTextures(1, &newDepth);
+    glGenTextures(
+        1,
+        &newDepth
+    );
     if (!validator_.ValidateAllocation(
             AetherisValidationTracker::Kind::Texture,
             "shadow_depth_texture",
-            newDepth))
-        goto fail;
+            newDepth)) {
+        discardNewTarget();
+        validator_.IsolatePass(
+            AetherisValidationTracker::Pass::Shadow,
+            "shadow_depth_allocation"
+        );
+        return false;
+    }
 
-    glBindTexture(GL_TEXTURE_2D, newDepth);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL);
+    glBindTexture(
+        GL_TEXTURE_2D,
+        newDepth
+    );
+    glTexParameteri(
+        GL_TEXTURE_2D,
+        GL_TEXTURE_MIN_FILTER,
+        GL_LINEAR
+    );
+    glTexParameteri(
+        GL_TEXTURE_2D,
+        GL_TEXTURE_MAG_FILTER,
+        GL_LINEAR
+    );
+    glTexParameteri(
+        GL_TEXTURE_2D,
+        GL_TEXTURE_WRAP_S,
+        GL_CLAMP_TO_EDGE
+    );
+    glTexParameteri(
+        GL_TEXTURE_2D,
+        GL_TEXTURE_WRAP_T,
+        GL_CLAMP_TO_EDGE
+    );
+    glTexParameteri(
+        GL_TEXTURE_2D,
+        GL_TEXTURE_COMPARE_MODE,
+        GL_COMPARE_REF_TO_TEXTURE
+    );
+    glTexParameteri(
+        GL_TEXTURE_2D,
+        GL_TEXTURE_COMPARE_FUNC,
+        GL_LEQUAL
+    );
     glTexImage2D(
         GL_TEXTURE_2D,
         0,
@@ -1523,10 +1656,15 @@ bool GLES3Renderer::EnsureShadowTarget() {
 
     if (!validator_.ValidateGlError(
             AetherisValidationTracker::Pass::Shadow,
-            "shadow_depth_storage"))
-        goto fail;
+            "shadow_depth_storage")) {
+        discardNewTarget();
+        return false;
+    }
 
-    glBindFramebuffer(GL_FRAMEBUFFER, newFbo);
+    glBindFramebuffer(
+        GL_FRAMEBUFFER,
+        newFbo
+    );
     glFramebufferTexture2D(
         GL_FRAMEBUFFER,
         GL_DEPTH_ATTACHMENT,
@@ -1534,29 +1672,34 @@ bool GLES3Renderer::EnsureShadowTarget() {
         newDepth,
         0
     );
-    glDrawBuffers(0, nullptr);
-    glReadBuffer(GL_NONE);
+
+    const GLenum noColor =
+        GL_NONE;
+    glDrawBuffers(
+        1,
+        &noColor
+    );
+    glReadBuffer(
+        GL_NONE
+    );
 
     if (!validator_.ValidateFramebuffer(
             newFbo,
             AetherisValidationTracker::Pass::Shadow,
-            "shadow_fbo"))
-        goto fail;
+            "shadow_fbo")) {
+        discardNewTarget();
+        return false;
+    }
 
     shadowFbo_ = newFbo;
     shadowDepth_ = newDepth;
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
-    return true;
 
-fail:
-    if (newDepth) glDeleteTextures(1, &newDepth);
-    if (newFbo) glDeleteFramebuffers(1, &newFbo);
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
-    validator_.IsolatePass(
-        AetherisValidationTracker::Pass::Shadow,
-        "shadow_allocation"
+    glBindFramebuffer(
+        GL_FRAMEBUFFER,
+        0
     );
-    return false;
+
+    return true;
 }
 
 void GLES3Renderer::UpdateCamera() noexcept {

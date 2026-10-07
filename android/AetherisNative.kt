@@ -15,6 +15,7 @@ object AetherisNative {
     @JvmStatic external fun nativeReleaseSurface()
     @JvmStatic external fun nativeSurfaceChanged(surface: Surface)
     @JvmStatic external fun nativeGizmo(type: Int, entity: Int, x: Float, y: Float, z: Float, w: Float)
+    @JvmStatic external fun nativeTouch(action: Int, x: Float, y: Float)
     @JvmStatic external fun nativeShutdown()
 
     const val API_VULKAN = 0

@@ -15,7 +15,7 @@ class EngineCore final {
  std::unique_ptr<IAetherisRenderer> activeRenderer_;
  RenderAPI activeApi_{RenderAPI::VULKAN};
  SceneSnapshot scene_;
- mutable std::mutex mutex_;
+ mutable std::recursive_mutex mutex_;
  bool frameActive_{};
  std::atomic_bool renderStop_{true};
  std::atomic_bool surfaceReady_{false};
@@ -42,7 +42,13 @@ public:
  void SetProjectRoot(const std::filesystem::path& root);
  bool BeginFrame(); void Draw(const RenderQueue&); void EndFrame();
  void OnSurfaceChanged(ANativeWindow*);
- void OnSurfaceDestroyed() noexcept; void ApplyGizmo(const GizmoCommand&);
+ void OnSurfaceDestroyed() noexcept;
+ void ApplyGizmo(const GizmoCommand&);
+ bool SetNodePosition(uint64_t nodeHandle, const Vec4& position) noexcept;
+ bool SetNodeRotation(uint64_t nodeHandle, const Vec4& rotation) noexcept;
+ bool SetNodeScale(uint64_t nodeHandle, const Vec4& scale) noexcept;
+ bool GetNodePosition(uint64_t nodeHandle, Vec4& outPosition) const noexcept;
+ uint64_t GetNodeHandle(uint32_t entityIndex) const noexcept;
  void Shutdown() noexcept;
  EngineState State() const noexcept;
  RenderAPI ActiveAPI() const noexcept; SceneSnapshot SnapshotScene() const;
