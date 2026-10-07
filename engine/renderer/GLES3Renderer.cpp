@@ -1105,8 +1105,8 @@ bool GLES3Renderer::EnsureGizmoProgram() {
         auto addLine = [&](float x0,float y0,float z0,float x1,float y1,float z1,
                            float r,float g,float b) {
             if (count + 2u > kMaxGizmoVertices) return;
-            vertices[count++] = {{{x0,y0,z0},{r,g,b,1.0f}}};
-            vertices[count++] = {{{x1,y1,z1},{r,g,b,1.0f}}};
+            vertices[count++] = GizmoVertex{{x0, y0, z0}, {r, g, b, 1.0f}};
+            vertices[count++] = GizmoVertex{{x1, y1, z1}, {r, g, b, 1.0f}};
         };
 
         constexpr float arrow = 0.28f;
