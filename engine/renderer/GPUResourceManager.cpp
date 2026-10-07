@@ -86,6 +86,25 @@ void GPUResourceManager::DestroyImage(GpuImage& x) noexcept {
     if (x.image) vkDestroyImage(device_, x.image, nullptr);
     x = {};
 }
+GpuImage GPUResourceManager::CreateAliasedImage(const VkImageCreateInfo& input, VkImageAspectFlags aspect, const GpuAllocation& allocation) noexcept {
+    GpuImage out{};
+    VkImageCreateInfo info = input;
+    info.flags |= VK_IMAGE_CREATE_ALIAS_BIT;
+    if (vkCreateImage(device_, &info, nullptr, &out.image) != VK_SUCCESS) return out;
+    VkMemoryRequirements req{}; vkGetImageMemoryRequirements(device_, out.image, &req);
+    if (!allocation.memory || allocation.offset % req.alignment != 0 || allocation.size < req.size ||
+        (req.memoryTypeBits & (1u << allocation.memoryType)) == 0 ||
+        vkBindImageMemory(device_, out.image, allocation.memory, allocation.offset) != VK_SUCCESS) {
+        vkDestroyImage(device_, out.image, nullptr); return {};
+    }
+    out.allocation = allocation;
+    VkImageViewCreateInfo vi{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+    vi.image = out.image; vi.viewType = VK_IMAGE_VIEW_TYPE_2D; vi.format = info.format;
+    vi.subresourceRange = {aspect, 0, info.mipLevels, 0, info.arrayLayers};
+    if (vkCreateImageView(device_, &vi, nullptr, &out.view) != VK_SUCCESS) { DestroyImage(out); return {}; }
+    return out;
+}
+
 void GPUResourceManager::DestroyBuffer(GpuBuffer& x) noexcept {
     if (x.buffer) vkDestroyBuffer(device_, x.buffer, nullptr);
     x = {};
@@ -109,14 +128,33 @@ VkDescriptorPool GPUResourceManager::AcquireDescriptorPool() noexcept {
     return slot.pool;
 }
 VkDescriptorSet GPUResourceManager::AllocateDescriptorSet(VkDescriptorSetLayout layout, uint32_t) noexcept {
-    VkDescriptorPool pool = AcquireDescriptorPool();
+    for (auto& slot : descriptorPools_) {
+        if (!slot.pool || !slot.remainingSets) continue;
+        VkDescriptorSetAllocateInfo ai{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+        ai.descriptorPool = slot.pool; ai.descriptorSetCount = 1; ai.pSetLayouts = &layout;
+        VkDescriptorSet set{};
+        const VkResult result = vkAllocateDescriptorSets(device_, &ai, &set);
+        if (result == VK_SUCCESS) { --slot.remainingSets; return set; }
+    }
+    const VkDescriptorPool pool = AcquireDescriptorPool();
     if (!pool) return VK_NULL_HANDLE;
-    VkDescriptorSetAllocateInfo ai{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
-    ai.descriptorPool = pool; ai.descriptorSetCount = 1; ai.pSetLayouts = &layout;
-    VkDescriptorSet set{};
-    if (vkAllocateDescriptorSets(device_, &ai, &set) != VK_SUCCESS) return VK_NULL_HANDLE;
-    for (auto& p : descriptorPools_) if (p.pool == pool && p.remainingSets) { --p.remainingSets; break; }
-    return set;
+    for (auto& slot : descriptorPools_) if (slot.pool == pool) {
+        VkDescriptorSetAllocateInfo ai{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+        ai.descriptorPool = pool; ai.descriptorSetCount = 1; ai.pSetLayouts = &layout;
+        VkDescriptorSet set{};
+        if (vkAllocateDescriptorSets(device_, &ai, &set) != VK_SUCCESS) return VK_NULL_HANDLE;
+        --slot.remainingSets; return set;
+    }
+    return VK_NULL_HANDLE;
+}
+
+void GPUResourceManager::ResetDescriptorPool(uint32_t frameIndex) noexcept {
+    if (!device_ || descriptorPoolCount_ == 0) return;
+    const uint32_t index = frameIndex % descriptorPoolCount_;
+    if (descriptorPools_[index].pool) {
+        if (vkResetDescriptorPool(device_, descriptorPools_[index].pool, 0) == VK_SUCCESS)
+            descriptorPools_[index].remainingSets = 256;
+    }
 }
 VkPipelineLayout GPUResourceManager::GetOrCreatePipelineLayout(const VkPipelineLayoutCreateInfo& info, uint64_t hash) noexcept {
     for (uint32_t i = 0; i < layoutCount_; ++i) if (layoutCache_[i].hash == hash) return layoutCache_[i].layout;
