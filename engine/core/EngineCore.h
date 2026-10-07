@@ -13,6 +13,7 @@ class EngineCore final {
  mutable std::mutex mutex_;
  bool frameActive_{};
  std::atomic_bool renderStop_{true};
+ std::atomic_bool surfaceReady_{false};
  std::thread renderThread_{};
  std::filesystem::path projectRoot_{};
  std::unique_ptr<IAetherisRenderer> MakeRenderer(RenderAPI);
