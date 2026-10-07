@@ -63,6 +63,7 @@ public:
     VkPipelineLayout GetOrCreatePipelineLayout(const VkPipelineLayoutCreateInfo& info, uint64_t stableHash) noexcept;
     void SavePipelineCache(const std::filesystem::path& path) noexcept;
     void ResetTransientFrameArena() noexcept;
+    VkPipelineCache PipelineCache() const noexcept { return pipelineCache_; }
 };
 
 }
