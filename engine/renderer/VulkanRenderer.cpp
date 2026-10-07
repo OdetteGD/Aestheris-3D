@@ -417,7 +417,9 @@ void VulkanRenderer::DestroySwapchain() noexcept {
 bool VulkanRenderer::RecreateSwapchain(ANativeWindow* w) {
     if (!device_) return false;
 
+    // The swapchain must be gone before its VkSurfaceKHR is destroyed.
     vkDeviceWaitIdle(device_);
+    DestroySwapchain();
 
     if (w && w != window_) {
         if (surface_) {
@@ -430,14 +432,15 @@ bool VulkanRenderer::RecreateSwapchain(ANativeWindow* w) {
         }
         window_ = w;
         ANativeWindow_acquire(window_);
-
         if (!CreateSurface()) return false;
     }
 
     if (!surface_) return false;
-
-    DestroySwapchain();
-    return CreateSwapchain() && CreateGBufferAttachments() && CreatePass() && CreateViews() && CreateFramebuffers();
+    return CreateSwapchain() &&
+           CreateGBufferAttachments() &&
+           CreatePass() &&
+           CreateViews() &&
+           CreateFramebuffers();
 }
 
 void VulkanRenderer::ReleaseSurface() noexcept {
