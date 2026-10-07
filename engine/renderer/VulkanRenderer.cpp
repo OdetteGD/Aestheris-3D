@@ -352,9 +352,9 @@ bool VulkanRenderer::CreateGBufferAttachments(){
     for(VkFormat f:candidates){VkFormatProperties p{};vkGetPhysicalDeviceFormatProperties(gpu_,f,&p);if(p.optimalTilingFeatures&VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT){depthFormat_=f;break;}}
     if(depthFormat_==VK_FORMAT_UNDEFINED){DestroyGBufferAttachments();return false;}const VkImageUsageFlags du=VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT|VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
     const VkImageUsageFlags depthUsage =
-        VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT |
         VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT |
-        VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT;
+        VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT |
+        VK_IMAGE_USAGE_SAMPLED_BIT;
 
     if (!CreateAttachmentImage(
             depthFormat_,
@@ -374,39 +374,29 @@ void VulkanRenderer::DestroyGBufferAttachments() noexcept {
 
     for (size_t i = 0; i < 3; ++i) {
         if (gbufferViews_[i])
-            vkDestroyImageView(device_,gbufferViews_[i],nullptr);
+            vkDestroyImageView(device_, gbufferViews_[i], nullptr);
         if (gbufferImages_[i])
-            vkDestroyImage(device_,gbufferImages_[i],nullptr);
+            vkDestroyImage(device_, gbufferImages_[i], nullptr);
         if (gbufferMemory_[i])
-            vkFreeMemory(device_,gbufferMemory_[i],nullptr);
+            vkFreeMemory(device_, gbufferMemory_[i], nullptr);
 
-        gbufferViews_[i] = {};
-        gbufferImages_[i] = {};
-        gbufferMemory_[i] = {};
+        gbufferViews_[i] = VK_NULL_HANDLE;
+        gbufferImages_[i] = VK_NULL_HANDLE;
+        gbufferMemory_[i] = VK_NULL_HANDLE;
     }
 
-    if (ssaoView_)
-        vkDestroyImageView(device_,ssaoView_,nullptr);
-    if (ssaoImage_)
-        vkDestroyImage(device_,ssaoImage_,nullptr);
-    if (ssaoMemory_)
-        vkFreeMemory(device_,ssaoMemory_,nullptr);
-
-    ssaoView_ = {};
-    ssaoImage_ = {};
-    ssaoMemory_ = {};
-
     if (depthView_)
-        vkDestroyImageView(device_,depthView_,nullptr);
+        vkDestroyImageView(device_, depthView_, nullptr);
     if (depthImage_)
-        vkDestroyImage(device_,depthImage_,nullptr);
+        vkDestroyImage(device_, depthImage_, nullptr);
     if (depthMemory_)
-        vkFreeMemory(device_,depthMemory_,nullptr);
+        vkFreeMemory(device_, depthMemory_, nullptr);
 
-    depthView_ = {};
-    depthImage_ = {};
-    depthMemory_ = {};
+    depthView_ = VK_NULL_HANDLE;
+    depthImage_ = VK_NULL_HANDLE;
+    depthMemory_ = VK_NULL_HANDLE;
 }
+
 bool VulkanRenderer::CreatePasses() {
     // Pass 1: geometry -> persistent G-buffer/depth.
     {
