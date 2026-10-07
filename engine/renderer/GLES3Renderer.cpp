@@ -96,7 +96,7 @@ void main() {
     UV = InUV;
     Material = InBaseColorMetallic;
     RoughnessAO = InRoughnessAO;
-    gl_Position = inverse(InvViewProj) * world;
+    gl_Position = uViewProj * world;
 }
 )GLSL";
 
