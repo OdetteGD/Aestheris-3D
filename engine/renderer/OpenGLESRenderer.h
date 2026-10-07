@@ -28,7 +28,7 @@ public:
     void EndFrame() override;
     bool RecreateSwapchain(ANativeWindow*) override;
     void ReleaseSurface() noexcept override;
-    void DrawRenderQueue(const RenderQueue&) override;
+    void DrawRenderQueue(const RenderQueue&, std::span<const Transform>) override;
     void Shutdown() noexcept override;
 
     uint64_t CreateOffscreenRenderTarget(uint32_t, uint32_t) override;
