@@ -855,76 +855,84 @@ bool VulkanRenderer::CreateFrames() {
 
 
 bool VulkanRenderer::BeginFrame() {
-    if (!initialized_ || begun_ || !swapchain_ || !surface_) return false;
+    if (!initialized_ ||
+        begun_ ||
+        !swapchain_ ||
+        !surface_) {
+        return false;
+    }
 
     Frame& frame = frames_[frame_];
 
-    if (vkWaitForFences(device_, 1, &frame.fence, VK_TRUE, UINT64_MAX) != VK_SUCCESS)
+    if (vkWaitForFences(
+            device_,
+            1,
+            &frame.fence,
+            VK_TRUE,
+            UINT64_MAX
+        ) != VK_SUCCESS) {
         return false;
+    }
 
-    const VkResult acquire = vkAcquireNextImageKHR(
-        device_, swapchain_, UINT64_MAX, frame.imageAvailable, VK_NULL_HANDLE, &image_);
+    const VkResult acquire =
+        vkAcquireNextImageKHR(
+            device_,
+            swapchain_,
+            UINT64_MAX,
+            frame.imageAvailable,
+            VK_NULL_HANDLE,
+            &image_
+        );
 
-    if (acquire == VK_ERROR_OUT_OF_DATE_KHR || acquire == VK_SUBOPTIMAL_KHR) {
-        AETHERIS_VK_LOGW("Acquire returned %s; rebuilding swapchain", VkResultName(acquire));
+    if (acquire == VK_ERROR_OUT_OF_DATE_KHR ||
+        acquire == VK_SUBOPTIMAL_KHR) {
+        AETHERIS_VK_LOGW(
+            "Acquire returned %s; rebuilding swapchain",
+            VkResultName(acquire)
+        );
         RecreateSwapchain(nullptr);
         return false;
     }
 
     if (acquire != VK_SUCCESS) {
-        AETHERIS_VK_LOGE("vkAcquireNextImageKHR failed: %s", VkResultName(acquire));
+        AETHERIS_VK_LOGE(
+            "vkAcquireNextImageKHR failed: %s",
+            VkResultName(acquire)
+        );
         return false;
     }
 
-    vkResetFences(device_, 1, &frame.fence);
-    vkResetCommandPool(device_, frame.pool, 0);
+    if(vkResetFences(
+            device_,
+            1,
+            &frame.fence
+        ) != VK_SUCCESS) {
+        return false;
+    }
+
+    if(vkResetCommandPool(
+            device_,
+            frame.pool,
+            0
+        ) != VK_SUCCESS) {
+        return false;
+    }
 
     VkCommandBufferBeginInfo beginInfo{
         VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO
     };
 
-    if (vkBeginCommandBuffer(frame.cmd, &beginInfo) != VK_SUCCESS)
+    if(vkBeginCommandBuffer(
+            frame.cmd,
+            &beginInfo
+        ) != VK_SUCCESS) {
         return false;
+    }
 
     UpdateCamera();
 
-    std::array<VkClearValue, 5> clears{};
-    clears[0].color = {{0.0f, 0.0f, 0.0f, 0.0f}};
-    clears[1].color = {{0.5f, 0.5f, 1.0f, 0.55f}};
-    clears[2].color = {{0.10f, 0.13f, 0.18f, 1.0f}};
-    clears[3].depthStencil = {1.0f, 0};
-    clears[4].color = {{0.0f, 0.0f, 0.0f, 1.0f}};
-
-    VkRenderPassBeginInfo renderPassBegin{
-        VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO
-    };
-
-    renderPassBegin.renderPass = pass_;
-    renderPassBegin.framebuffer = framebuffers_[image_];
-    renderPassBegin.renderArea.extent = extent_;
-    renderPassBegin.clearValueCount = static_cast<uint32_t>(clears.size());
-    renderPassBegin.pClearValues = clears.data();
-
-    vkCmdBeginRenderPass(
-        frame.cmd,
-        &renderPassBegin,
-        VK_SUBPASS_CONTENTS_INLINE
-    );
-
-    VkViewport viewport{
-        0.0f, 0.0f,
-        static_cast<float>(extent_.width),
-        static_cast<float>(extent_.height),
-        0.0f, 1.0f
-    };
-
-    VkRect2D scissor{{0, 0}, extent_};
-
-    vkCmdSetViewport(frame.cmd, 0, 1, &viewport);
-    vkCmdSetScissor(frame.cmd, 0, 1, &scissor);
-
     begun_ = true;
-    mainRenderPassActive_ = true;
+    mainRenderPassActive_ = false;
     frameRecorded_ = false;
 
     return true;
