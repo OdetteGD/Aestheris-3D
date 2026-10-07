@@ -718,37 +718,96 @@ bool VulkanRenderer::CreateViews() {
 }
 
 bool VulkanRenderer::CreateFramebuffers() {
-    framebuffers_.resize(views_.size());
-    postFramebuffers_.resize(views_.size());
-
-    for (size_t i = 0; i < views_.size(); ++i) {
-        const std::array<VkImageView, 6> attachments = {
+    // Geometry framebuffer: G-buffer + depth.
+    {
+        const VkImageView attachments[4] = {
             gbufferViews_[0],
             gbufferViews_[1],
             gbufferViews_[2],
-            depthView_,
-            ssaoView_,
+            depthView_
+        };
+
+        VkFramebufferCreateInfo info{
+            VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO
+        };
+
+        info.renderPass = geometryPass_;
+        info.attachmentCount = 4;
+        info.pAttachments = attachments;
+        info.width = extent_.width;
+        info.height = extent_.height;
+        info.layers = 1;
+
+        if(vkCreateFramebuffer(
+                device_,
+                &info,
+                nullptr,
+                &geometryFramebuffer_) != VK_SUCCESS)
+            return false;
+    }
+
+    // SSAO framebuffer is half resolution.
+    {
+        const VkImageView attachment =
+            ssaoView_;
+
+        VkFramebufferCreateInfo info{
+            VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO
+        };
+
+        info.renderPass = ssaoPass_;
+        info.attachmentCount = 1;
+        info.pAttachments = &attachment;
+        info.width = ssaoExtent_.width;
+        info.height = ssaoExtent_.height;
+        info.layers = 1;
+
+        if(vkCreateFramebuffer(
+                device_,
+                &info,
+                nullptr,
+                &ssaoFramebuffer_) != VK_SUCCESS)
+            return false;
+    }
+
+    // Lighting framebuffers contain only input attachments and HDR color.
+    framebuffers_.resize(
+        views_.size()
+    );
+    postFramebuffers_.resize(
+        views_.size()
+    );
+
+    for(size_t i=0;i<views_.size();++i) {
+        const VkImageView attachments[4] = {
+            gbufferViews_[0],
+            gbufferViews_[1],
+            gbufferViews_[2],
             hdrView_
         };
 
-        VkFramebufferCreateInfo mainInfo{
+        VkFramebufferCreateInfo lightingInfo{
             VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO
         };
-        mainInfo.renderPass = pass_;
-        mainInfo.attachmentCount = 6;
-        mainInfo.pAttachments = attachments.data();
-        mainInfo.width = extent_.width;
-        mainInfo.height = extent_.height;
-        mainInfo.layers = 1;
 
-        if (vkCreateFramebuffer(
-                device_, &mainInfo, nullptr, &framebuffers_[i]) != VK_SUCCESS) {
+        lightingInfo.renderPass = pass_;
+        lightingInfo.attachmentCount = 4;
+        lightingInfo.pAttachments = attachments;
+        lightingInfo.width = extent_.width;
+        lightingInfo.height = extent_.height;
+        lightingInfo.layers = 1;
+
+        if(vkCreateFramebuffer(
+                device_,
+                &lightingInfo,
+                nullptr,
+                &framebuffers_[i]) != VK_SUCCESS)
             return false;
-        }
 
         VkFramebufferCreateInfo postInfo{
             VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO
         };
+
         postInfo.renderPass = postPass_;
         postInfo.attachmentCount = 1;
         postInfo.pAttachments = &views_[i];
@@ -756,10 +815,12 @@ bool VulkanRenderer::CreateFramebuffers() {
         postInfo.height = extent_.height;
         postInfo.layers = 1;
 
-        if (vkCreateFramebuffer(
-                device_, &postInfo, nullptr, &postFramebuffers_[i]) != VK_SUCCESS) {
+        if(vkCreateFramebuffer(
+                device_,
+                &postInfo,
+                nullptr,
+                &postFramebuffers_[i]) != VK_SUCCESS)
             return false;
-        }
     }
 
     return true;
