@@ -27,7 +27,7 @@ void AppendEscaped(
     for (const char c : text) {
         switch (c) {
             case '\\': out += "\\\\"; break;
-            case '"': out += "\\""; break;
+            case '"': out += "\\\""; break;
             case '\n': out += "\\n"; break;
             case '\r': out += "\\r"; break;
             case '\t': out += "\\t"; break;
