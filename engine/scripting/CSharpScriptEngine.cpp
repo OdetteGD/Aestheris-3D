@@ -50,6 +50,18 @@ CSharpScriptEngine& CSharpScriptEngine::Instance() noexcept {
 }
 
 bool CSharpScriptEngine::ResolveMonoApi() noexcept {
+    mono_set_assemblies_path_ =
+        ResolveSymbol<fn_mono_set_assemblies_path>(
+            monoLibrary_,
+            "mono_set_assemblies_path"
+        );
+
+    mono_set_dirs_ =
+        ResolveSymbol<fn_mono_set_dirs>(
+            monoLibrary_,
+            "mono_set_dirs"
+        );
+
     mono_jit_init_version_ =
         ResolveSymbol<fn_mono_jit_init_version>(
             monoLibrary_,
@@ -117,6 +129,8 @@ bool CSharpScriptEngine::ResolveMonoApi() noexcept {
         );
 
     return
+        mono_set_assemblies_path_ &&
+        mono_set_dirs_ &&
         mono_jit_init_version_ &&
         mono_jit_cleanup_ &&
         mono_thread_attach_ &&
@@ -349,6 +363,21 @@ bool CSharpScriptEngine::Initialize(
         return true;
     }
 
+    const std::filesystem::path runtimeDir =
+        projectRoot_ / "assets/csharp/runtime";
+    const std::filesystem::path sdkDir =
+        projectRoot_ / "assets/csharp/sdk";
+    const std::string assemblySearchPath =
+        runtimeDir.string() + ":" + sdkDir.string();
+
+    mono_set_dirs_(
+        runtimeDir.string().c_str(),
+        runtimeDir.string().c_str()
+    );
+    mono_set_assemblies_path_(
+        assemblySearchPath.c_str()
+    );
+
     rootDomain_ =
         mono_jit_init_version_(
             "Aetheris",
@@ -450,6 +479,8 @@ void CSharpScriptEngine::Shutdown() noexcept {
         monoLibrary_ = nullptr;
     }
 
+    mono_set_assemblies_path_ = nullptr;
+    mono_set_dirs_ = nullptr;
     mono_jit_init_version_ = nullptr;
     mono_jit_cleanup_ = nullptr;
     mono_thread_attach_ = nullptr;
@@ -594,7 +625,7 @@ uint64_t Aetheris_GetNodeHandle(
         ) + 1ull;
 }
 
-bool Aetheris_SetNodePosition(
+int32_t Aetheris_SetNodePosition(
     uint64_t nodeHandle,
     float x,
     float y,
@@ -613,7 +644,7 @@ bool Aetheris_SetNodePosition(
     );
 }
 
-bool Aetheris_SetNodeRotation(
+int32_t Aetheris_SetNodeRotation(
     uint64_t nodeHandle,
     float x,
     float y,
@@ -634,7 +665,7 @@ bool Aetheris_SetNodeRotation(
     );
 }
 
-bool Aetheris_SetNodeScale(
+int32_t Aetheris_SetNodeScale(
     uint64_t nodeHandle,
     float x,
     float y,
@@ -656,7 +687,7 @@ bool Aetheris_SetNodeScale(
     );
 }
 
-bool Aetheris_GetNodePosition(
+int32_t Aetheris_GetNodePosition(
     uint64_t nodeHandle,
     float* x,
     float* y,
