@@ -687,17 +687,171 @@ bool VulkanRenderer::BeginFrame() {
     return true;
 }
 
+bool VulkanRenderer::RecordShadowMaps(
+    const RenderQueue& queue,
+    std::span<const Transform> transforms) noexcept
+{
+    if (!shadowPass_ || !shadowPipeline_)
+        return false;
+
+    Frame& frame = frames_[frame_];
+
+    vkCmdBindPipeline(
+        frame.cmd,
+        VK_PIPELINE_BIND_POINT_GRAPHICS,
+        shadowPipeline_
+    );
+
+    for (uint32_t cascade=0; cascade<3; ++cascade) {
+        VkClearValue clear{};
+        clear.depthStencil = {1.0f,0};
+
+        VkRenderPassBeginInfo begin{
+            VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO
+        };
+        begin.renderPass = shadowPass_;
+        begin.framebuffer = shadowFramebuffers_[cascade];
+        begin.renderArea.extent = csmExtent_;
+        begin.clearValueCount = 1;
+        begin.pClearValues = &clear;
+
+        vkCmdBeginRenderPass(
+            frame.cmd,
+            &begin,
+            VK_SUBPASS_CONTENTS_INLINE
+        );
+
+        VkViewport viewport{
+            0.0f,0.0f,
+            static_cast<float>(csmExtent_.width),
+            static_cast<float>(csmExtent_.height),
+            0.0f,1.0f
+        };
+        VkRect2D scissor{{0,0},csmExtent_};
+
+        vkCmdSetViewport(frame.cmd,0,1,&viewport);
+        vkCmdSetScissor(frame.cmd,0,1,&scissor);
+
+        uint32_t boundMesh = UINT32_MAX;
+
+        for (const RenderItem& item : queue.Items()) {
+            if (item.meshId >= kMaxDemoMeshes ||
+                item.transformIndex >= transforms.size())
+                continue;
+
+            const MeshGpu& mesh =
+                demoMeshes_[item.meshId];
+
+            if (!mesh.vertex.buffer ||
+                !mesh.index.buffer ||
+                mesh.indexCount == 0)
+                continue;
+
+            if (boundMesh != item.meshId) {
+                const VkBuffer vb = mesh.vertex.buffer;
+                const VkDeviceSize offset = 0;
+
+                vkCmdBindVertexBuffers(
+                    frame.cmd,0,1,&vb,&offset
+                );
+
+                vkCmdBindIndexBuffer(
+                    frame.cmd,
+                    mesh.index.buffer,
+                    0,
+                    VK_INDEX_TYPE_UINT32
+                );
+
+                boundMesh = item.meshId;
+            }
+
+            struct ShadowPush final {
+                Mat4 lightViewProj{};
+                Mat4 model{};
+            };
+            static_assert(sizeof(ShadowPush)==128);
+
+            ShadowPush push{};
+            push.lightViewProj =
+                csmMatrices_[cascade];
+            push.model =
+                MakeModel(
+                    transforms[
+                        item.transformIndex
+                    ]
+                );
+
+            vkCmdPushConstants(
+                frame.cmd,
+                shadowLayout_,
+                VK_SHADER_STAGE_VERTEX_BIT,
+                0,
+                sizeof(push),
+                &push
+            );
+
+            vkCmdDrawIndexed(
+                frame.cmd,
+                mesh.indexCount,
+                1,
+                0,
+                0,
+                0
+            );
+        }
+
+        vkCmdEndRenderPass(frame.cmd);
+    }
+
+    return true;
+}
+
 void VulkanRenderer::DrawRenderQueue(
     const RenderQueue& queue,
     std::span<const Transform> transforms
 ) {
-    if (!begun_ || !mainRenderPassActive_ || frameRecorded_)
+    if (!begun_ || frameRecorded_)
         return;
 
-    if (!UpdateFrameUniforms())
+    if (!RecordShadowMaps(queue, transforms))
         return;
 
     Frame& frame = frames_[frame_];
+
+    std::array<VkClearValue,5> clears{};
+    clears[0].color = {{0.0f,0.0f,0.0f,0.0f}};
+    clears[1].color = {{0.5f,0.5f,1.0f,0.55f}};
+    clears[2].color = {{0.10f,0.13f,0.18f,1.0f}};
+    clears[3].depthStencil = {1.0f,0};
+    clears[4].color = {{0.0f,0.0f,0.0f,1.0f}};
+
+    VkRenderPassBeginInfo mainBegin{
+        VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO
+    };
+    mainBegin.renderPass = pass_;
+    mainBegin.framebuffer = framebuffers_[image_];
+    mainBegin.renderArea.extent = extent_;
+    mainBegin.clearValueCount = 5;
+    mainBegin.pClearValues = clears.data();
+
+    vkCmdBeginRenderPass(
+        frame.cmd,
+        &mainBegin,
+        VK_SUBPASS_CONTENTS_INLINE
+    );
+
+    mainRenderPassActive_ = true;
+
+    VkViewport viewport{
+        0.0f,0.0f,
+        static_cast<float>(extent_.width),
+        static_cast<float>(extent_.height),
+        0.0f,1.0f
+    };
+    VkRect2D scissor{{0,0},extent_};
+
+    vkCmdSetViewport(frame.cmd,0,1,&viewport);
+    vkCmdSetScissor(frame.cmd,0,1,&scissor);
 
     vkCmdBindPipeline(
         frame.cmd,
@@ -709,24 +863,27 @@ void VulkanRenderer::DrawRenderQueue(
 
     for (const RenderItem& item : queue.Items()) {
         if (item.meshId >= kMaxDemoMeshes ||
-            item.transformIndex >= transforms.size()) {
+            item.transformIndex >= transforms.size())
             continue;
-        }
 
         const MeshGpu& mesh = demoMeshes_[item.meshId];
 
         if (!mesh.vertex.buffer ||
             !mesh.index.buffer ||
-            mesh.indexCount == 0) {
+            mesh.indexCount == 0)
             continue;
-        }
 
         if (boundMesh != item.meshId) {
             const VkBuffer vertexBuffer = mesh.vertex.buffer;
             const VkDeviceSize offset = 0;
 
             vkCmdBindVertexBuffers(
-                frame.cmd, 0, 1, &vertexBuffer, &offset);
+                frame.cmd,
+                0,
+                1,
+                &vertexBuffer,
+                &offset
+            );
 
             vkCmdBindIndexBuffer(
                 frame.cmd,
@@ -738,27 +895,39 @@ void VulkanRenderer::DrawRenderQueue(
             boundMesh = item.meshId;
         }
 
-        struct alignas(16) GeometryPush final {
+        const uint32_t materialIndex =
+            item.materialId % kMaxDemoMeshes;
+
+        vkCmdBindDescriptorSets(
+            frame.cmd,
+            VK_PIPELINE_BIND_POINT_GRAPHICS,
+            geometryLayout_,
+            0,
+            1,
+            &materialSets_[materialIndex],
+            0,
+            nullptr
+        );
+
+        struct GeometryPush final {
             Mat4 viewProj{};
             Mat4 model{};
         };
-
         static_assert(sizeof(GeometryPush) == 128);
 
-        const Transform& transform =
-            transforms[item.transformIndex];
-
-        GeometryPush constants{};
-        constants.viewProj = viewProj_;
-        constants.model = MakeModel(transform);
+        GeometryPush push{};
+        push.viewProj = viewProj_;
+        push.model = MakeModel(
+            transforms[item.transformIndex]
+        );
 
         vkCmdPushConstants(
             frame.cmd,
             geometryLayout_,
             VK_SHADER_STAGE_VERTEX_BIT,
             0,
-            sizeof(constants),
-            &constants
+            sizeof(push),
+            &push
         );
 
         vkCmdDrawIndexed(
@@ -783,34 +952,37 @@ void VulkanRenderer::DrawRenderQueue(
     );
 
     const uint32_t dynamicOffset =
-        static_cast<uint32_t>(frame_ * frameUboStride_);
+        static_cast<uint32_t>(
+            frame_ * frameUboStride_
+        );
+
+    const VkDescriptorSet lightingSets[2] = {
+        lightingInputSet_,
+        lightingFrameSet_
+    };
 
     vkCmdBindDescriptorSets(
         frame.cmd,
         VK_PIPELINE_BIND_POINT_GRAPHICS,
         lightingLayout_,
         0,
-        1,
-        &lightingInputSet_,
-        0,
-        nullptr
-    );
-
-    vkCmdBindDescriptorSets(
-        frame.cmd,
-        VK_PIPELINE_BIND_POINT_GRAPHICS,
-        lightingLayout_,
-        1,
-        1,
-        &lightingFrameSet_,
+        2,
+        lightingSets,
         1,
         &dynamicOffset
     );
 
-    // Full-screen triangle invokes deferred_lighting_mobile.frag.
-    vkCmdDraw(frame.cmd, 3, 1, 0, 0);
+    vkCmdDraw(
+        frame.cmd,
+        3,
+        1,
+        0,
+        0
+    );
 
-    vkCmdEndRenderPass(frame.cmd);
+    vkCmdEndRenderPass(
+        frame.cmd
+    );
     mainRenderPassActive_ = false;
 
     VkImageMemoryBarrier hdrBarrier{
@@ -832,7 +1004,7 @@ void VulkanRenderer::DrawRenderQueue(
     hdrBarrier.image = hdrImage_;
     hdrBarrier.subresourceRange = {
         VK_IMAGE_ASPECT_COLOR_BIT,
-        0, 1, 0, 1
+        0,1,0,1
     };
 
     vkCmdPipelineBarrier(
@@ -840,23 +1012,174 @@ void VulkanRenderer::DrawRenderQueue(
         VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
         0,
-        0, nullptr,
-        0, nullptr,
-        1, &hdrBarrier
+        0,nullptr,
+        0,nullptr,
+        1,&hdrBarrier
     );
 
-    VkClearValue postClear{};
-    postClear.color = {{0.0f, 0.0f, 0.0f, 1.0f}};
+    VkClearValue bloomClear{};
+    bloomClear.color = {{0.0f,0.0f,0.0f,1.0f}};
+
+    VkRenderPassBeginInfo downBegin{
+        VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO
+    };
+    downBegin.renderPass = bloomDownPass_;
+    downBegin.framebuffer = bloomDownFramebuffers_[0];
+    downBegin.renderArea.extent = bloomExtent_;
+    downBegin.clearValueCount = 1;
+    downBegin.pClearValues = &bloomClear;
+
+    vkCmdBeginRenderPass(
+        frame.cmd,
+        &downBegin,
+        VK_SUBPASS_CONTENTS_INLINE
+    );
+
+    VkViewport bloomViewport{
+        0.0f,0.0f,
+        static_cast<float>(bloomExtent_.width),
+        static_cast<float>(bloomExtent_.height),
+        0.0f,1.0f
+    };
+    VkRect2D bloomScissor{{0,0},bloomExtent_};
+
+    vkCmdSetViewport(
+        frame.cmd,0,1,&bloomViewport
+    );
+    vkCmdSetScissor(
+        frame.cmd,0,1,&bloomScissor
+    );
+
+    vkCmdBindPipeline(
+        frame.cmd,
+        VK_PIPELINE_BIND_POINT_GRAPHICS,
+        bloomDownPipeline_
+    );
+
+    vkCmdBindDescriptorSets(
+        frame.cmd,
+        VK_PIPELINE_BIND_POINT_GRAPHICS,
+        postLayout_,
+        0,
+        1,
+        &bloomDownSet_,
+        0,
+        nullptr
+    );
+
+    vkCmdDraw(frame.cmd,3,1,0,0);
+    vkCmdEndRenderPass(frame.cmd);
+
+    VkImageMemoryBarrier bloomARead{
+        VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER
+    };
+    bloomARead.srcAccessMask =
+        VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    bloomARead.dstAccessMask =
+        VK_ACCESS_SHADER_READ_BIT;
+    bloomARead.oldLayout =
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    bloomARead.newLayout =
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    bloomARead.srcQueueFamilyIndex =
+        VK_QUEUE_FAMILY_IGNORED;
+    bloomARead.dstQueueFamilyIndex =
+        VK_QUEUE_FAMILY_IGNORED;
+    bloomARead.image = bloomA_;
+    bloomARead.subresourceRange = {
+        VK_IMAGE_ASPECT_COLOR_BIT,0,1,0,1
+    };
+
+    vkCmdPipelineBarrier(
+        frame.cmd,
+        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+        0,
+        0,nullptr,
+        0,nullptr,
+        1,&bloomARead
+    );
+
+    VkRenderPassBeginInfo upBegin{
+        VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO
+    };
+    upBegin.renderPass = bloomUpPass_;
+    upBegin.framebuffer = bloomUpFramebuffers_[0];
+    upBegin.renderArea.extent = bloomExtent_;
+    upBegin.clearValueCount = 1;
+    upBegin.pClearValues = &bloomClear;
+
+    vkCmdBeginRenderPass(
+        frame.cmd,
+        &upBegin,
+        VK_SUBPASS_CONTENTS_INLINE
+    );
+
+    vkCmdSetViewport(
+        frame.cmd,0,1,&bloomViewport
+    );
+    vkCmdSetScissor(
+        frame.cmd,0,1,&bloomScissor
+    );
+
+    vkCmdBindPipeline(
+        frame.cmd,
+        VK_PIPELINE_BIND_POINT_GRAPHICS,
+        bloomUpPipeline_
+    );
+
+    vkCmdBindDescriptorSets(
+        frame.cmd,
+        VK_PIPELINE_BIND_POINT_GRAPHICS,
+        postLayout_,
+        0,
+        1,
+        &bloomUpSet_,
+        0,
+        nullptr
+    );
+
+    vkCmdDraw(frame.cmd,3,1,0,0);
+    vkCmdEndRenderPass(frame.cmd);
+
+    VkImageMemoryBarrier bloomBRead{
+        VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER
+    };
+    bloomBRead.srcAccessMask =
+        VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    bloomBRead.dstAccessMask =
+        VK_ACCESS_SHADER_READ_BIT;
+    bloomBRead.oldLayout =
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    bloomBRead.newLayout =
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    bloomBRead.srcQueueFamilyIndex =
+        VK_QUEUE_FAMILY_IGNORED;
+    bloomBRead.dstQueueFamilyIndex =
+        VK_QUEUE_FAMILY_IGNORED;
+    bloomBRead.image = bloomB_;
+    bloomBRead.subresourceRange = {
+        VK_IMAGE_ASPECT_COLOR_BIT,0,1,0,1
+    };
+
+    vkCmdPipelineBarrier(
+        frame.cmd,
+        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+        0,
+        0,nullptr,
+        0,nullptr,
+        1,&bloomBRead
+    );
 
     VkRenderPassBeginInfo postBegin{
         VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO
     };
-
     postBegin.renderPass = postPass_;
     postBegin.framebuffer = postFramebuffers_[image_];
     postBegin.renderArea.extent = extent_;
     postBegin.clearValueCount = 1;
-    postBegin.pClearValues = &postClear;
+    postBegin.pClearValues = &bloomClear;
 
     vkCmdBeginRenderPass(
         frame.cmd,
@@ -864,17 +1187,8 @@ void VulkanRenderer::DrawRenderQueue(
         VK_SUBPASS_CONTENTS_INLINE
     );
 
-    VkViewport viewport{
-        0.0f, 0.0f,
-        static_cast<float>(extent_.width),
-        static_cast<float>(extent_.height),
-        0.0f, 1.0f
-    };
-
-    VkRect2D scissor{{0, 0}, extent_};
-
-    vkCmdSetViewport(frame.cmd, 0, 1, &viewport);
-    vkCmdSetScissor(frame.cmd, 0, 1, &scissor);
+    vkCmdSetViewport(frame.cmd,0,1,&viewport);
+    vkCmdSetScissor(frame.cmd,0,1,&scissor);
 
     vkCmdBindPipeline(
         frame.cmd,
@@ -893,11 +1207,16 @@ void VulkanRenderer::DrawRenderQueue(
         nullptr
     );
 
-    const PostPushConstants post{
-        1.15f,
+    struct PostPush {
+        float exposure;
+        float bloomStrength;
+        float invWidth;
+        float invHeight;
+    } post{
+        1.18f,
+        0.35f,
         1.0f / std::max(1.0f, static_cast<float>(extent_.width)),
-        1.0f / std::max(1.0f, static_cast<float>(extent_.height)),
-        0.22f
+        1.0f / std::max(1.0f, static_cast<float>(extent_.height))
     };
 
     vkCmdPushConstants(
@@ -909,11 +1228,12 @@ void VulkanRenderer::DrawRenderQueue(
         &post
     );
 
-    vkCmdDraw(frame.cmd, 3, 1, 0, 0);
+    vkCmdDraw(frame.cmd,3,1,0,0);
     vkCmdEndRenderPass(frame.cmd);
 
     frameRecorded_ = true;
 }
+
 
 void VulkanRenderer::EndFrame() {
     if (!begun_) return;
