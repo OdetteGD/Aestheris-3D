@@ -22,8 +22,23 @@ struct alignas(16) CameraBlock {
     Vec4 viewportAndTime{};
 };
 
+// Matches shaders/deferred_lighting_mobile.frag::Frame exactly.
+// std140 rounds the final uniform-block size to a 16-byte multiple.
+struct alignas(16) DeferredFrameBlock {
+    Vec4 cameraPosition{};
+    Vec4 sunDirection{};
+    Vec4 sunColor{};
+    float maxPrefilterMip{};
+    float padding0{};
+    float padding1{};
+    float padding2{};
+};
+
 static_assert(alignof(Vec4) == 16 && sizeof(Vec4) == 16);
 static_assert(alignof(Mat4) == 16 && sizeof(Mat4) == 64);
 static_assert(alignof(CameraBlock) == 16 && offsetof(CameraBlock, cameraPosition) == 64);
+static_assert(alignof(DeferredFrameBlock) == 16 &&
+              offsetof(DeferredFrameBlock, maxPrefilterMip) == 48 &&
+              sizeof(DeferredFrameBlock) == 64);
 
 }
