@@ -1,11 +1,15 @@
 cmake_minimum_required(VERSION 3.22.1)
 project(AetherisEngine LANGUAGES CXX)
 
+# One native boundary: Kotlin/JNI, renderer, graph, resource manager and Android helpers
+# are linked into the single libaetheris3d.so production artifact.
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-add_library(aetheris SHARED
+add_library(aetheris3d SHARED
     engine/core/EngineCore.cpp
     engine/project/VirtualFileSystem.cpp
     engine/renderer/VulkanRenderer.cpp
@@ -16,18 +20,18 @@ add_library(aetheris SHARED
     engine/renderer/TextureStreaming.cpp
     engine/renderer/TransientAliasPlanner.cpp
     android/AndroidHardwareBufferBridge.cpp
-    android/AetherisJNI.cpp
+    android/JniBridge.cpp
     engine/shader/ShaderResourceManager.cpp
 )
 
-target_include_directories(aetheris PRIVATE
+target_include_directories(aetheris3d PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
 find_library(log-lib log)
 find_library(android-lib android)
 
-target_link_libraries(aetheris PRIVATE
+target_link_libraries(aetheris3d PRIVATE
     ${log-lib}
     ${android-lib}
     vulkan
@@ -35,28 +39,38 @@ target_link_libraries(aetheris PRIVATE
     GLESv3
 )
 
-target_compile_definitions(aetheris PRIVATE
+target_compile_definitions(aetheris3d PRIVATE
     AETHERIS_ANDROID=1
     VK_USE_PLATFORM_ANDROID_KHR=1
 )
 
-target_compile_options(aetheris PRIVATE
+target_compile_options(aetheris3d PRIVATE
     -Wall
     -Wextra
     -Wpedantic
     -Wconversion
     -Wshadow
     -Werror=return-type
+    -O3
+    -flto
+    -fvisibility=hidden
+    -ffunction-sections
+    -fdata-sections
 )
 
-set_target_properties(aetheris PROPERTIES
+target_link_options(aetheris3d PRIVATE
+    -flto
+    -Wl,--gc-sections
+)
+
+set_target_properties(aetheris3d PROPERTIES
     CXX_VISIBILITY_PRESET hidden
     VISIBILITY_INLINES_HIDDEN YES
 )
 
 # Use ccache when the Android build environment provides it.
 if(DEFINED CMAKE_C_COMPILER_LAUNCHER)
-    set_property(TARGET aetheris PROPERTY C_COMPILER_LAUNCHER "${CMAKE_C_COMPILER_LAUNCHER}")
+    set_property(TARGET aetheris3d PROPERTY C_COMPILER_LAUNCHER "${CMAKE_C_COMPILER_LAUNCHER}")
 endif()
 if(DEFINED CMAKE_CXX_COMPILER_LAUNCHER)
     set_property(TARGET aetheris PROPERTY CXX_COMPILER_LAUNCHER "${CMAKE_CXX_COMPILER_LAUNCHER}")
