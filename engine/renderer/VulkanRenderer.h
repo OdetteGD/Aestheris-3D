@@ -67,6 +67,7 @@ class VulkanRenderer final : public IAetherisRenderer {
     uint32_t environmentWidth_{};
     uint32_t environmentHeight_{};
     uint32_t environmentMipLevels_{1};
+    uint32_t prefilteredMipLevels_{1};
 
     VkRenderPass geometryPass_{};
     VkRenderPass pass_{};
