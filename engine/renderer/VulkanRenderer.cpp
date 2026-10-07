@@ -4297,7 +4297,7 @@ bool VulkanRenderer::CreateDefaultIBL() {
             irradianceImage_,
             irradianceMemory_,
             irradianceView_,
-            mipLevels
+            irradianceMipLevels
         )) {
         // Boot fallback only when the developer has not supplied offline IBL.
         const std::array<uint8_t,4> neutral = {
@@ -4345,6 +4345,7 @@ bool VulkanRenderer::CreateDefaultIBL() {
     }
 
     uint32_t specularMipLevels = 1;
+    uint32_t irradianceMipLevels = 1;
 
     if (!CreateKtx2Cube(
             root / "ibl_prefiltered.ktx2",
@@ -4525,7 +4526,9 @@ bool VulkanRenderer::CreateDefaultIBL() {
         }
     }
 
-    (void)mipLevels;
+    if (!environmentView_)
+        LoadOfflineEnvironment();
+
     return true;
 }
 
