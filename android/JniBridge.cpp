@@ -5,6 +5,11 @@
 
 using namespace aetheris;
 
+namespace {
+RenderAPI SelectApi(jint api) noexcept {
+    return api == 1 ? RenderAPI::OPENGL_ES3 : RenderAPI::VULKAN;
+}
+}
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_aetheris_engine_AetherisNative_nativeSetProjectRoot(
