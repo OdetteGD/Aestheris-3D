@@ -8,6 +8,12 @@ on:
   workflow_dispatch:
     inputs:
       clean_native:
+        description: "Recreate native intermediates before building"
+        required: false
+        default: true
+        type: boolean
+    inputs:
+      clean_native:
         description: "Recreate app/.cxx before building"
         required: false
         default: true
