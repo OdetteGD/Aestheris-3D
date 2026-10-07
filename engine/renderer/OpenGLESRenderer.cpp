@@ -158,7 +158,7 @@ void OpenGLESRenderer::ReleaseSurface() noexcept {
     }
 }
 
-void OpenGLESRenderer::DrawRenderQueue(const RenderQueue&) {
+void OpenGLESRenderer::DrawRenderQueue(const RenderQueue&, std::span<const Transform>) {
     // RenderGraph passes issue GLES draws here.
 }
 
