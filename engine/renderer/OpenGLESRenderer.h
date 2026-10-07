@@ -25,6 +25,7 @@ public:
 
     bool Initialize(ANativeWindow*) override;
     bool EnsureDeferredResources() override { return true; }
+    void AbortDeferredResources() noexcept override {}
     bool IsReady() const noexcept override { return initialized_ && surface_ != EGL_NO_SURFACE; }
     bool BeginFrame() override;
     void EndFrame() override;
