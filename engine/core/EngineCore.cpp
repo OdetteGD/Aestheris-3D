@@ -65,7 +65,10 @@ bool EngineCore::CreateRendererLocked(RenderAPI a, ANativeWindow* w) {
 
 bool EngineCore::Initialize(RenderAPI a, ANativeWindow* w) {
     std::scoped_lock l(mutex_);
-    return activeRenderer_ ? true : CreateRendererLocked(a, w);
+    if (activeRenderer_) return true;
+    if (!CreateRendererLocked(a, w)) return false;
+    StartRenderLoopLocked();
+    return true;
 }
 
 bool EngineCore::SwitchGraphicsAPI(RenderAPI a, ANativeWindow* w) {
@@ -82,7 +85,10 @@ bool EngineCore::SwitchGraphicsAPI(RenderAPI a, ANativeWindow* w) {
     }
 
     scene_ = std::move(saved);
-    if (CreateRendererLocked(a, w)) return true;
+    if (CreateRendererLocked(a, w)) {
+        StartRenderLoopLocked();
+        return true;
+    }
 
     // Preserve the active renderer if a requested API fails to initialize.
     if (a != RenderAPI::VULKAN) {
