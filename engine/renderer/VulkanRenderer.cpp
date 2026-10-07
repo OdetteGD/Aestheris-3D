@@ -1410,28 +1410,77 @@ bool VulkanRenderer::CreateShaderModules() {
 }
 
 bool VulkanRenderer::CreateDescriptorLayouts() {
+    std::array<VkDescriptorSetLayoutBinding, 4> materialBindings{};
+
+    materialBindings[0] = {
+        0,
+        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        1,
+        VK_SHADER_STAGE_FRAGMENT_BIT,
+        nullptr
+    };
+
+    for (uint32_t i = 1; i < 4; ++i) {
+        materialBindings[i] = {
+            i,
+            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            1,
+            VK_SHADER_STAGE_FRAGMENT_BIT,
+            nullptr
+        };
+    }
+
+    VkDescriptorSetLayoutCreateInfo materialInfo{
+        VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO
+    };
+
+    materialInfo.bindingCount =
+        static_cast<uint32_t>(
+            materialBindings.size()
+        );
+
+    materialInfo.pBindings =
+        materialBindings.data();
+
+    if (vkCreateDescriptorSetLayout(
+            device_,
+            &materialInfo,
+            nullptr,
+            &materialSetLayout_
+        ) != VK_SUCCESS) {
+        return false;
+    }
+
     std::array<VkDescriptorSetLayoutBinding, 3> inputBindings{};
+
     for (uint32_t i = 0; i < 3; ++i) {
-        inputBindings[i].binding = i;
-        inputBindings[i].descriptorType =
-            VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT;
-        inputBindings[i].descriptorCount = 1;
-        inputBindings[i].stageFlags =
-            VK_SHADER_STAGE_FRAGMENT_BIT;
+        inputBindings[i] = {
+            i,
+            VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT,
+            1,
+            VK_SHADER_STAGE_FRAGMENT_BIT,
+            nullptr
+        };
     }
 
     VkDescriptorSetLayoutCreateInfo inputInfo{
         VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO
     };
+
     inputInfo.bindingCount = 3;
     inputInfo.pBindings = inputBindings.data();
 
     if (vkCreateDescriptorSetLayout(
-            device_, &inputInfo, nullptr, &lightingInputLayout_) != VK_SUCCESS) {
+            device_,
+            &inputInfo,
+            nullptr,
+            &lightingInputLayout_
+        ) != VK_SUCCESS) {
         return false;
     }
 
-    std::array<VkDescriptorSetLayoutBinding, 4> frameBindings{};
+    std::array<VkDescriptorSetLayoutBinding, 5> frameBindings{};
+
     frameBindings[0] = {
         0,
         VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
@@ -1450,33 +1499,65 @@ bool VulkanRenderer::CreateDescriptorLayouts() {
         };
     }
 
-    VkDescriptorSetLayoutCreateInfo frameInfo{
-        VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO
-    };
-    frameInfo.bindingCount = 4;
-    frameInfo.pBindings = frameBindings.data();
-
-    if (vkCreateDescriptorSetLayout(
-            device_, &frameInfo, nullptr, &lightingFrameLayout_) != VK_SUCCESS) {
-        return false;
-    }
-
-    VkDescriptorSetLayoutBinding postBinding{
-        0,
+    frameBindings[4] = {
+        4,
         VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
         1,
         VK_SHADER_STAGE_FRAGMENT_BIT,
         nullptr
     };
 
+    VkDescriptorSetLayoutCreateInfo frameInfo{
+        VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO
+    };
+
+    frameInfo.bindingCount =
+        static_cast<uint32_t>(
+            frameBindings.size()
+        );
+
+    frameInfo.pBindings =
+        frameBindings.data();
+
+    if (vkCreateDescriptorSetLayout(
+            device_,
+            &frameInfo,
+            nullptr,
+            &lightingFrameLayout_
+        ) != VK_SUCCESS) {
+        return false;
+    }
+
+    std::array<VkDescriptorSetLayoutBinding, 2> postBindings{{
+        {
+            0,
+            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            1,
+            VK_SHADER_STAGE_FRAGMENT_BIT,
+            nullptr
+        },
+        {
+            1,
+            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            1,
+            VK_SHADER_STAGE_FRAGMENT_BIT,
+            nullptr
+        }
+    }};
+
     VkDescriptorSetLayoutCreateInfo postInfo{
         VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO
     };
-    postInfo.bindingCount = 1;
-    postInfo.pBindings = &postBinding;
+
+    postInfo.bindingCount = 2;
+    postInfo.pBindings = postBindings.data();
 
     if (vkCreateDescriptorSetLayout(
-            device_, &postInfo, nullptr, &postSetLayout_) != VK_SUCCESS) {
+            device_,
+            &postInfo,
+            nullptr,
+            &postSetLayout_
+        ) != VK_SUCCESS) {
         return false;
     }
 
@@ -1489,11 +1570,23 @@ bool VulkanRenderer::CreateDescriptorLayouts() {
     VkPipelineLayoutCreateInfo geometryLayoutInfo{
         VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO
     };
-    geometryLayoutInfo.pushConstantRangeCount = 1;
-    geometryLayoutInfo.pPushConstantRanges = &geometryPush;
+
+    geometryLayoutInfo.setLayoutCount = 1;
+    geometryLayoutInfo.pSetLayouts =
+        &materialSetLayout_;
+
+    geometryLayoutInfo.pushConstantRangeCount =
+        1;
+
+    geometryLayoutInfo.pPushConstantRanges =
+        &geometryPush;
 
     if (vkCreatePipelineLayout(
-            device_, &geometryLayoutInfo, nullptr, &geometryLayout_) != VK_SUCCESS) {
+            device_,
+            &geometryLayoutInfo,
+            nullptr,
+            &geometryLayout_
+        ) != VK_SUCCESS) {
         return false;
     }
 
@@ -1505,11 +1598,40 @@ bool VulkanRenderer::CreateDescriptorLayouts() {
     VkPipelineLayoutCreateInfo lightingLayoutInfo{
         VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO
     };
+
     lightingLayoutInfo.setLayoutCount = 2;
-    lightingLayoutInfo.pSetLayouts = lightingLayouts.data();
+    lightingLayoutInfo.pSetLayouts =
+        lightingLayouts.data();
 
     if (vkCreatePipelineLayout(
-            device_, &lightingLayoutInfo, nullptr, &lightingLayout_) != VK_SUCCESS) {
+            device_,
+            &lightingLayoutInfo,
+            nullptr,
+            &lightingLayout_
+        ) != VK_SUCCESS) {
+        return false;
+    }
+
+    VkPushConstantRange shadowPush{
+        VK_SHADER_STAGE_VERTEX_BIT,
+        0,
+        128
+    };
+
+    VkPipelineLayoutCreateInfo shadowLayoutInfo{
+        VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO
+    };
+
+    shadowLayoutInfo.pushConstantRangeCount = 1;
+    shadowLayoutInfo.pPushConstantRanges =
+        &shadowPush;
+
+    if (vkCreatePipelineLayout(
+            device_,
+            &shadowLayoutInfo,
+            nullptr,
+            &shadowLayout_
+        ) != VK_SUCCESS) {
         return false;
     }
 
@@ -1522,10 +1644,14 @@ bool VulkanRenderer::CreateDescriptorLayouts() {
     VkPipelineLayoutCreateInfo postLayoutInfo{
         VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO
     };
+
     postLayoutInfo.setLayoutCount = 1;
-    postLayoutInfo.pSetLayouts = &postSetLayout_;
+    postLayoutInfo.pSetLayouts =
+        &postSetLayout_;
+
     postLayoutInfo.pushConstantRangeCount = 1;
-    postLayoutInfo.pPushConstantRanges = &postPush;
+    postLayoutInfo.pPushConstantRanges =
+        &postPush;
 
     return vkCreatePipelineLayout(
         device_,
