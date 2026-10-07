@@ -2721,7 +2721,7 @@ bool VulkanRenderer::CreateDescriptorPoolAndSets() {
             materialCount * 3u +
             3u +          // IBL
             3u +          // shadow, environment, SSAO
-            2u            // bloom/post
+            4u            // post + bloom down/up
         }
     }};
 
