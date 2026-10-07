@@ -1304,8 +1304,8 @@ bool VulkanRenderer::CreateShaderModules() {
 
     const std::filesystem::path root =
         projectRoot_.empty()
-            ? std::filesystem::path("assets/shaders/spirv")
-            : projectRoot_ / "assets/shaders/spirv";
+            ? std::filesystem::path("assets/shaders")
+            : projectRoot_ / "assets/shaders";
 
     for (const ShaderFile& file : files) {
         std::vector<uint32_t> words{};
