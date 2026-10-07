@@ -58,11 +58,22 @@ class VulkanRenderer final : public IAetherisRenderer {
 
     VkRenderPass pass_{};
     VkRenderPass postPass_{};
+    VkRenderPass bloomDownPass_{};
+    VkRenderPass bloomUpPass_{};
 
     std::vector<VkImage> images_{};
     std::vector<VkImageView> views_{};
     std::vector<VkFramebuffer> framebuffers_{};
     std::vector<VkFramebuffer> postFramebuffers_{};
+    VkImage bloomA_{};
+    VkImageView bloomAView_{};
+    VkDeviceMemory bloomAMemory_{};
+    VkImage bloomB_{};
+    VkImageView bloomBView_{};
+    VkDeviceMemory bloomBMemory_{};
+    std::array<VkFramebuffer, 1> bloomDownFramebuffers_{};
+    std::array<VkFramebuffer, 1> bloomUpFramebuffers_{};
+    VkExtent2D bloomExtent_{};
 
     std::array<Frame, Frames> frames_{};
 
@@ -72,6 +83,11 @@ class VulkanRenderer final : public IAetherisRenderer {
     VkShaderModule lightingFrag_{};
     VkShaderModule postFrag_{};
     VkShaderModule shadowVert_{};
+    VkShaderModule shadowFrag_{};
+    VkShaderModule bloomDownVert_{};
+    VkShaderModule bloomUpVert_{};
+    VkShaderModule bloomDownFrag_{};
+    VkShaderModule bloomUpFrag_{};
 
     VkPipelineLayout geometryLayout_{};
     VkPipelineLayout lightingLayout_{};
@@ -82,6 +98,8 @@ class VulkanRenderer final : public IAetherisRenderer {
     VkPipeline lightingPipeline_{};
     VkPipeline postPipeline_{};
     VkPipeline shadowPipeline_{};
+    VkPipeline bloomDownPipeline_{};
+    VkPipeline bloomUpPipeline_{};
 
     VkDescriptorSetLayout lightingInputLayout_{};
     VkDescriptorSetLayout lightingFrameLayout_{};
@@ -178,6 +196,7 @@ class VulkanRenderer final : public IAetherisRenderer {
     bool CreateDefaultIBL();
     bool CreateMaterialResources();
     bool CreateCSMResources();
+    bool CreateBloomResources();
     bool CreateDemoMeshes();
 
     bool UploadBufferToDeviceLocal(
@@ -261,6 +280,7 @@ class VulkanRenderer final : public IAetherisRenderer {
     void DestroyDefaultIBL() noexcept;
     void DestroyMaterialResources() noexcept;
     void DestroyCSMResources() noexcept;
+    void DestroyBloomResources() noexcept;
     void DestroyGBufferAttachments() noexcept;
     void DestroySwapchain() noexcept;
 
