@@ -86,9 +86,12 @@ void EngineCore::RenderOneFrameLocked() {
             );
         } else {
             assetBootFailed_ = true;
+            activeRenderer_->AbortDeferredResources();
             state_ = EngineState::SurfaceReady;
             LogFatalBootFailureLocked(
-                elapsed > kDeferredBootBudget ? "asset_timeout" : "asset_allocation",
+                elapsed > kDeferredBootBudget
+                    ? "asset_timeout"
+                    : "asset_allocation",
                 elapsed > kDeferredBootBudget
                     ? "deferred Vulkan resource boot exceeded 750ms"
                     : "deferred Vulkan resource boot failed"
