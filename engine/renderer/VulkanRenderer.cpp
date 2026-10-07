@@ -1414,6 +1414,7 @@ bool VulkanRenderer::RecreateSwapchain(ANativeWindow* w) {
         CreateSwapchain() &&
         CreateGBufferAttachments() &&
         CreateHDRTarget() &&
+        CreateBloomResources() &&
         CreatePasses() &&
         CreateViews() &&
         CreateFramebuffers() &&
