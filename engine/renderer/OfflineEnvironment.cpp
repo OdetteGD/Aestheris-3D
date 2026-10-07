@@ -1,4 +1,5 @@
 #include "OfflineEnvironment.h"
+#include <vulkan/vulkan.h>
 
 #include <algorithm>
 #include <array>
