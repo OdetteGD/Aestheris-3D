@@ -2,16 +2,11 @@ name: Aetheris Engine Android CI/CD
 
 on:
   push:
-    branches:
-      - main
-      - master
+    branches: [main, master]
   pull_request:
-    branches:
-      - main
-      - master
+    branches: [main, master]
   workflow_dispatch:
 
-# Keep build configuration centralized and reproducible.
 env:
   JAVA_VERSION: "17"
   ANDROID_NDK_VERSION: "27.2.12479018"
@@ -23,7 +18,6 @@ jobs:
     name: Build Aetheris Engine Editor
     runs-on: ubuntu-latest
 
-    # Avoid overlapping builds for the same branch/PR.
     concurrency:
       group: aetheris-android-${{ github.workflow }}-${{ github.ref }}
       cancel-in-progress: true
@@ -32,16 +26,10 @@ jobs:
       contents: read
 
     steps:
-      # ------------------------------------------------------------
-      # Checkout
-      # ------------------------------------------------------------
       - name: Checkout Aetheris Engine
         uses: actions/checkout@v4
 
-      # ------------------------------------------------------------
-      # Java 17
-      # Required by modern Android Gradle Plugin/toolchains.
-      # ------------------------------------------------------------
+      # Install Java 17 and let setup-java restore Gradle dependencies.
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
@@ -49,15 +37,11 @@ jobs:
           java-version: ${{ env.JAVA_VERSION }}
           cache: gradle
 
-      # ------------------------------------------------------------
-      # Android SDK / NDK / CMake
-      # sdkmanager is used explicitly so the native build environment
-      # is deterministic instead of relying on whatever happens to be
-      # preinstalled on the GitHub-hosted runner.
-      # ------------------------------------------------------------
+      # Install the Android SDK command-line tools.
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
+      # Pin the exact Android platform, NDK and CMake versions used by CI.
       - name: Install Android SDK, NDK and CMake
         shell: bash
         run: |
@@ -74,20 +58,9 @@ jobs:
 
           echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT}" >> "${GITHUB_ENV}"
           echo "ANDROID_HOME=${ANDROID_SDK_ROOT}" >> "${GITHUB_ENV}"
-          echo "${ANDROID_SDK_ROOT}/platform-tools" >> "${GITHUB_PATH}"
-          echo "${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin" >> "${GITHUB_PATH}"
 
-          echo "Installed Android SDK:"
-          sdkmanager --list_installed | grep -E \
-            "platform-tools|platforms;android-${ANDROID_API_LEVEL}|build-tools;35.0.0|ndk;${ANDROID_NDK_VERSION}|cmake;${ANDROID_CMAKE_VERSION}" \
-            || true
-
-      # ------------------------------------------------------------
-      # Validate native toolchain.
-      # This catches incorrectly configured runners before Gradle
-      # starts an expensive Android/CMake build.
-      # ------------------------------------------------------------
-      - name: Verify Android NDK and CMake
+      # Verify that the exact native toolchain requested by the project exists.
+      - name: Verify Android toolchain
         shell: bash
         run: |
           set -euo pipefail
@@ -98,163 +71,71 @@ jobs:
           test -d "${NDK_HOME}"
           test -x "${CMAKE_HOME}/bin/cmake"
 
-          echo "NDK: ${NDK_HOME}"
-          "${NDK_HOME}/ndk-build" --version
-
-          echo "CMake: ${CMAKE_HOME}"
-          "${CMAKE_HOME}/bin/cmake" --version
-
           echo "ANDROID_NDK_HOME=${NDK_HOME}" >> "${GITHUB_ENV}"
           echo "ANDROID_NDK_ROOT=${NDK_HOME}" >> "${GITHUB_ENV}"
           echo "CMAKE_HOME=${CMAKE_HOME}" >> "${GITHUB_ENV}"
-
           echo "${CMAKE_HOME}/bin" >> "${GITHUB_PATH}"
 
-      # ------------------------------------------------------------
-      # Gradle wrapper permissions.
-      # Required on fresh GitHub-hosted Linux runners.
-      # ------------------------------------------------------------
+          "${NDK_HOME}/ndk-build" --version
+          "${CMAKE_HOME}/bin/cmake" --version
+
+      # The repository now contains a self-bootstrapping Gradle wrapper.
       - name: Make Gradle wrapper executable
         shell: bash
-        run: |
-          set -euo pipefail
-          chmod +x ./gradlew
+        run: chmod +x ./gradlew
 
-      # ------------------------------------------------------------
-      # Gradle dependency/build cache.
-      #
-      # setup-java's Gradle cache handles the normal Gradle dependency
-      # cache. This additional cache preserves project-local Gradle
-      # build outputs where possible between workflow executions.
-      # ------------------------------------------------------------
-      - name: Cache Gradle build outputs
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-            .gradle
-            app/.gradle
-          key: >-
-            ${{ runner.os }}-gradle-
-            ${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties', '**/gradle.properties', '**/libs.versions.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-gradle-
-
-      # ------------------------------------------------------------
-      # C/C++ compiler cache.
-      #
-      # Aetheris contains a substantial C++20/Vulkan native layer, so
-      # ccache significantly reduces rebuild time when only a subset
-      # of the renderer/editor sources changed.
-      # ------------------------------------------------------------
-      - name: Install and configure ccache
+      # Cache native C++ compiler results and Android/CMake intermediates.
+      - name: Install ccache
         shell: bash
         run: |
           set -euo pipefail
-
           sudo apt-get update
           sudo apt-get install -y ccache
-
           mkdir -p "${HOME}/.ccache"
-
-          ccache --version
-
+          ccache --set-config=max_size=2G
+          ccache --set-config=compiler_check=content
           echo "CCACHE_DIR=${HOME}/.ccache" >> "${GITHUB_ENV}"
           echo "CCACHE_BASEDIR=${GITHUB_WORKSPACE}" >> "${GITHUB_ENV}"
-          echo "CCACHE_COMPILERCHECK=content" >> "${GITHUB_ENV}"
 
-          ccache --set-config=max_size=2G
-
-          # Make ccache discoverable before CMake/Gradle starts.
-          echo "/usr/lib/ccache" >> "${GITHUB_PATH}"
-
-      # ------------------------------------------------------------
-      # Persist ccache between workflow runs.
-      # ------------------------------------------------------------
-      - name: Cache CMake / NDK compilation
+      - name: Cache native build
         uses: actions/cache@v4
         with:
           path: |
             ~/.ccache
-            **/.cxx
+            app/.cxx
+            .gradle
+            ~/.gradle/aether-wrapper
           key: >-
             ${{ runner.os }}-aetheris-native-
             ndk-${{ env.ANDROID_NDK_VERSION }}-
             cmake-${{ env.ANDROID_CMAKE_VERSION }}-
-            ${{ hashFiles('**/CMakeLists.txt', '**/*.cmake', '**/*.cpp', '**/*.cc', '**/*.c', '**/*.h', '**/*.hpp') }}
+            ${{ hashFiles('CMakeLists.txt', 'engine/**/*.cpp', 'engine/**/*.h', 'android/**/*.cpp', 'android/**/*.h') }}
           restore-keys: |
             ${{ runner.os }}-aetheris-native-ndk-${{ env.ANDROID_NDK_VERSION }}-cmake-${{ env.ANDROID_CMAKE_VERSION }}-
             ${{ runner.os }}-aetheris-native-
 
-      # ------------------------------------------------------------
-      # Configure ccache for the Android NDK toolchain.
-      #
-      # CMake/Gradle remains responsible for selecting the actual
-      # Android clang compiler; ccache only accelerates compilation.
-      # ------------------------------------------------------------
-      - name: Configure native compiler cache
+      # Confirm the Gradle project is present before starting the expensive build.
+      - name: Validate Android Gradle project
         shell: bash
         run: |
           set -euo pipefail
 
-          ccache --zero-stats
+          test -f ./gradlew
+          test -f ./settings.gradle.kts
+          test -f ./build.gradle.kts
+          test -f ./app/build.gradle.kts
+          test -f ./app/src/main/AndroidManifest.xml
+          test -f ./CMakeLists.txt
 
-          # These variables are consumed by the Android/CMake toolchain.
-          echo "CMAKE_C_COMPILER_LAUNCHER=ccache" >> "${GITHUB_ENV}"
-          echo "CMAKE_CXX_COMPILER_LAUNCHER=ccache" >> "${GITHUB_ENV}"
+          echo "Android Gradle project detected."
+          echo "Native ABIs: armeabi-v7a, arm64-v8a"
 
-      # ------------------------------------------------------------
-      # Report environment before the build.
-      # Useful when diagnosing NDK/CMake/Gradle incompatibilities.
-      # ------------------------------------------------------------
-      - name: Print build environment
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          echo "=== Java ==="
-          java -version
-
-          echo "=== Gradle ==="
-          ./gradlew --version
-
-          echo "=== Android SDK ==="
-          echo "${ANDROID_SDK_ROOT}"
-
-          echo "=== Android NDK ==="
-          echo "${ANDROID_NDK_ROOT}"
-
-          echo "=== CMake ==="
-          cmake --version
-
-          echo "=== ccache ==="
-          ccache --show-config
-
-      # ------------------------------------------------------------
-      # Build Aetheris Editor.
-      #
-      # assembleRelease is intentionally used for CI because it
-      # exercises the production Android/native packaging path.
-      #
-      # IMPORTANT:
-      # The Android Gradle module should define:
-      #
-      #   ndk {
-      #       abiFilters "armeabi-v7a", "arm64-v8a"
-      #   }
-      #
-      # or the equivalent modern AGP configuration.
-      #
-      # This workflow does not silently alter the application's
-      # Gradle configuration, keeping architecture decisions inside
-      # the project itself.
-      # ------------------------------------------------------------
+      # Build the production release. externalNativeBuild invokes the C++20
+      # CMake target for both ABIs declared in app/build.gradle.kts.
       - name: Build Aetheris Engine Editor
         shell: bash
         env:
           ANDROID_NDK_HOME: ${{ env.ANDROID_NDK_ROOT }}
-          CMAKE_GENERATOR: Ninja
         run: |
           set -euo pipefail
 
@@ -264,93 +145,59 @@ jobs:
             --warning-mode all \
             assembleRelease
 
-      # ------------------------------------------------------------
-      # Display ccache statistics after the native build.
-      # ------------------------------------------------------------
-      - name: Show native compiler cache statistics
+      # Display native cache efficiency without making it a build failure.
+      - name: Show ccache statistics
         if: always()
         shell: bash
-        run: |
-          ccache --show-stats || true
+        run: ccache --show-stats || true
 
-      # ------------------------------------------------------------
-      # Locate the generated APK.
-      #
-      # The build can produce variant-specific filenames, so we search
-      # the complete Android output tree rather than assuming a single
-      # hard-coded Gradle filename.
-      # ------------------------------------------------------------
+      # Locate the actual release APK generated by Gradle.
       - name: Locate release APK
         id: apk
         shell: bash
         run: |
           set -euo pipefail
 
-          APK_DIR="app/build/outputs/apk"
-
-          if [[ ! -d "${APK_DIR}" ]]; then
-            echo "APK output directory does not exist:"
-            echo "${APK_DIR}"
-            exit 1
-          fi
-
           mapfile -t APKS < <(
-            find "${APK_DIR}" \
-              -type f \
-              -name "*.apk" \
-              -print \
-              | sort
+            find app/build/outputs/apk/release \
+              -type f -name "*.apk" -print | sort
           )
 
           if [[ "${#APKS[@]}" -eq 0 ]]; then
-            echo "No APK was produced."
-            find app/build/outputs -maxdepth 5 -type f -print || true
+            echo "No release APK was produced."
+            find app/build/outputs -maxdepth 6 -type f -print || true
             exit 1
           fi
 
-          echo "Generated APKs:"
-          printf '  %s\n' "${APKS[@]}"
+          APK="${APKS[0]}"
+          echo "Selected APK: ${APK}"
+          echo "apk_path=${APK}" >> "${GITHUB_OUTPUT}"
 
-          # Prefer a release APK when multiple variants are present.
-          RELEASE_APK=""
-
-          for apk in "${APKS[@]}"; do
-            if [[ "${apk}" == *"/release/"* ]]; then
-              RELEASE_APK="${apk}"
-              break
-            fi
-          done
-
-          if [[ -z "${RELEASE_APK}" ]]; then
-            RELEASE_APK="${APKS[0]}"
-          fi
-
-          echo "Selected APK:"
-          echo "${RELEASE_APK}"
-
-          echo "apk_path=${RELEASE_APK}" >> "${GITHUB_OUTPUT}"
-
-      # ------------------------------------------------------------
-      # Rename/copy the selected APK to the stable artifact name.
-      # This gives developers a predictable filename regardless of
-      # the Gradle application/version naming configuration.
-      # ------------------------------------------------------------
-      - name: Prepare Aetheris Engine artifact
+      # Ensure the packaged APK really contains both requested native ABIs.
+      - name: Validate APK native ABIs
         shell: bash
         run: |
           set -euo pipefail
 
+          APK="${{ steps.apk.outputs.apk_path }}"
+
+          command -v unzip >/dev/null 2>&1
+
+          unzip -l "${APK}" | grep -F "lib/armeabi-v7a/libaetheris.so"
+          unzip -l "${APK}" | grep -F "lib/arm64-v8a/libaetheris.so"
+
+          echo "Both Aetheris native ABIs are present."
+
+      # Give every workflow run a stable, developer-friendly artifact filename.
+      - name: Prepare Aetheris Engine artifact
+        shell: bash
+        run: |
+          set -euo pipefail
           mkdir -p artifacts
-
-          cp "${{ steps.apk.outputs.apk_path }}" \
-            "artifacts/AetherisEngine-Editor.apk"
-
+          cp "${{ steps.apk.outputs.apk_path }}" "artifacts/AetherisEngine-Editor.apk"
           ls -lh artifacts/AetherisEngine-Editor.apk
 
-      # ------------------------------------------------------------
-      # Upload APK for developers/QA to download from the workflow.
-      # PR builds therefore produce a directly testable Android package.
-      # ------------------------------------------------------------
+      # Upload the APK so PR #1 can be installed directly on Android hardware.
       - name: Upload Aetheris Engine Editor APK
         uses: actions/upload-artifact@v4
         with:
@@ -360,11 +207,7 @@ jobs:
           compression-level: 6
           retention-days: 14
 
-      # ------------------------------------------------------------
-      # Upload native build diagnostics if the build fails.
-      # This is especially useful for CMake/NDK/Vulkan compilation
-      # failures without polluting successful artifacts.
-      # ------------------------------------------------------------
+      # Preserve native/CMake diagnostics when a build fails.
       - name: Upload native build diagnostics
         if: failure()
         uses: actions/upload-artifact@v4
