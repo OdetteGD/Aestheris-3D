@@ -1662,63 +1662,165 @@ bool VulkanRenderer::CreateDescriptorLayouts() {
 }
 
 bool VulkanRenderer::CreateDescriptorPoolAndSets() {
-    const std::array<VkDescriptorPoolSize, 3> sizes = {{
-        {VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 3},
-        {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1},
-        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 4}
+    constexpr uint32_t materialCount =
+        kMaxDemoMeshes;
+
+    const std::array<VkDescriptorPoolSize, 4> sizes = {{
+        {
+            VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT,
+            3
+        },
+        {
+            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+            materialCount
+        },
+        {
+            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
+            1
+        },
+        {
+            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            materialCount * 3 + 3 + 1 + 2 + 2
+        }
     }};
 
     VkDescriptorPoolCreateInfo poolInfo{
         VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO
     };
-    poolInfo.maxSets = 3;
+
+    poolInfo.maxSets =
+        materialCount + 1 + 1 + 1 + 2;
+
     poolInfo.poolSizeCount =
         static_cast<uint32_t>(sizes.size());
-    poolInfo.pPoolSizes = sizes.data();
+
+    poolInfo.pPoolSizes =
+        sizes.data();
 
     if (vkCreateDescriptorPool(
             device_,
             &poolInfo,
             nullptr,
-            &descriptorPool_) != VK_SUCCESS) {
+            &descriptorPool_
+        ) != VK_SUCCESS) {
         return false;
     }
 
-    const std::array<VkDescriptorSetLayout, 3> layouts = {{
-        lightingInputLayout_,
-        lightingFrameLayout_,
-        postSetLayout_
-    }};
+    // Allocate all material sets once. Frame rendering only binds one of them.
+    {
+        std::array<VkDescriptorSetLayout, kMaxDemoMeshes> layouts{};
 
-    std::array<VkDescriptorSet, 3> sets{};
+        for (uint32_t i = 0; i < materialCount; ++i)
+            layouts[i] = materialSetLayout_;
 
-    VkDescriptorSetAllocateInfo allocateInfo{
-        VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO
-    };
-    allocateInfo.descriptorPool = descriptorPool_;
-    allocateInfo.descriptorSetCount = 3;
-    allocateInfo.pSetLayouts = layouts.data();
+        if (vkAllocateDescriptorSets(
+                device_,
+                &(VkDescriptorSetAllocateInfo{
+                    VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+                    nullptr,
+                    0,
+                    descriptorPool_,
+                    materialCount,
+                    layouts.data()
+                }),
+                materialSets_.data()
+            ) != VK_SUCCESS) {
+            return false;
+        }
+    }
+
+    // Lighting input attachments.
+    if (vkAllocateDescriptorSets(
+            device_,
+            &(VkDescriptorSetAllocateInfo{
+                VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+                nullptr,
+                0,
+                descriptorPool_,
+                1,
+                &lightingInputLayout_
+            }),
+            &lightingInputSet_
+        ) != VK_SUCCESS) {
+        return false;
+    }
+
+    // Per-frame lighting UBO + IBL + CSM.
+    if (vkAllocateDescriptorSets(
+            device_,
+            &(VkDescriptorSetAllocateInfo{
+                VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+                nullptr,
+                0,
+                descriptorPool_,
+                1,
+                &lightingFrameLayout_
+            }),
+            &lightingFrameSet_
+        ) != VK_SUCCESS) {
+        return false;
+    }
 
     if (vkAllocateDescriptorSets(
             device_,
-            &allocateInfo,
-            sets.data()) != VK_SUCCESS) {
+            &(VkDescriptorSetAllocateInfo{
+                VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+                nullptr,
+                0,
+                descriptorPool_,
+                3,
+                std::array<VkDescriptorSetLayout,3>{
+                    postSetLayout_,
+                    postSetLayout_,
+                    postSetLayout_
+                }.data()
+            }),
+            std::array<VkDescriptorSet,3>{
+                postSet_,
+                bloomDownSet_,
+                bloomUpSet_
+            }.data()
+        ) != VK_SUCCESS) {
         return false;
     }
 
-    lightingInputSet_ = sets[0];
-    lightingFrameSet_ = sets[1];
-    postSet_ = sets[2];
+    // Re-allocation into the temporary std::array above cannot safely write the
+    // three member handles because the array is temporary. Allocate them directly.
+    const VkDescriptorSetLayout postLayouts[3] = {
+        postSetLayout_,
+        postSetLayout_,
+        postSetLayout_
+    };
+    VkDescriptorSet postSets[3]{};
 
-    std::array<VkDescriptorImageInfo, 3> inputImages{};
-    for (uint32_t i = 0; i < 3; ++i) {
+    VkDescriptorSetAllocateInfo postAllocate{
+        VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO
+    };
+    postAllocate.descriptorPool = descriptorPool_;
+    postAllocate.descriptorSetCount = 3;
+    postAllocate.pSetLayouts = postLayouts;
+
+    if (vkAllocateDescriptorSets(
+            device_,
+            &postAllocate,
+            postSets
+        ) != VK_SUCCESS) {
+        return false;
+    }
+
+    postSet_ = postSets[0];
+    bloomDownSet_ = postSets[1];
+    bloomUpSet_ = postSets[2];
+
+    std::array<VkDescriptorImageInfo,3> inputImages{};
+    for (uint32_t i=0;i<3;++i) {
         inputImages[i].imageView = gbufferViews_[i];
         inputImages[i].imageLayout =
             VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     }
 
-    std::array<VkWriteDescriptorSet, 3> inputWrites{};
-    for (uint32_t i = 0; i < 3; ++i) {
+    std::array<VkWriteDescriptorSet,3> inputWrites{};
+    for (uint32_t i=0;i<3;++i) {
         inputWrites[i] = {
             VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET
         };
@@ -1730,13 +1832,81 @@ bool VulkanRenderer::CreateDescriptorPoolAndSets() {
         inputWrites[i].pImageInfo = &inputImages[i];
     }
 
+    vkUpdateDescriptorSets(
+        device_,
+        3,
+        inputWrites.data(),
+        0,
+        nullptr
+    );
+
+    for (uint32_t i=0;i<materialCount;++i) {
+        MaterialGpu& material = materials_[i];
+
+        VkDescriptorBufferInfo bufferInfo{
+            material.uniform.buffer,
+            0,
+            sizeof(std140::MaterialBlock)
+        };
+
+        const std::array<VkDescriptorImageInfo,3> images = {{
+            {
+                linearSampler_,
+                material.albedoView,
+                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+            },
+            {
+                linearSampler_,
+                material.normalView,
+                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+            },
+            {
+                linearSampler_,
+                material.ormView,
+                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+            }
+        }};
+
+        std::array<VkWriteDescriptorSet,4> writes{};
+
+        writes[0] = {
+            VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET
+        };
+        writes[0].dstSet = materialSets_[i];
+        writes[0].dstBinding = 0;
+        writes[0].descriptorCount = 1;
+        writes[0].descriptorType =
+            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        writes[0].pBufferInfo = &bufferInfo;
+
+        for (uint32_t b=0;b<3;++b) {
+            writes[b+1] = {
+                VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET
+            };
+            writes[b+1].dstSet = materialSets_[i];
+            writes[b+1].dstBinding = b+1;
+            writes[b+1].descriptorCount = 1;
+            writes[b+1].descriptorType =
+                VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            writes[b+1].pImageInfo = &images[b];
+        }
+
+        vkUpdateDescriptorSets(
+            device_,
+            static_cast<uint32_t>(writes.size()),
+            writes.data(),
+            0,
+            nullptr
+        );
+    }
+
     VkDescriptorBufferInfo frameInfo{
         frameUbo_.buffer,
         0,
         sizeof(std140::DeferredFrameBlock)
     };
 
-    std::array<VkDescriptorImageInfo, 3> iblImages = {{
+    const std::array<VkDescriptorImageInfo,4> frameImages = {{
         {
             linearSampler_,
             irradianceView_,
@@ -1751,10 +1921,16 @@ bool VulkanRenderer::CreateDescriptorPoolAndSets() {
             linearSampler_,
             brdfView_,
             VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+        },
+        {
+            shadowSampler_,
+            csmArrayView_,
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
         }
     }};
 
-    std::array<VkWriteDescriptorSet, 4> frameWrites{};
+    std::array<VkWriteDescriptorSet,5> frameWrites{};
+
     frameWrites[0] = {
         VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET
     };
@@ -1765,46 +1941,110 @@ bool VulkanRenderer::CreateDescriptorPoolAndSets() {
         VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
     frameWrites[0].pBufferInfo = &frameInfo;
 
-    for (uint32_t i = 0; i < 3; ++i) {
-        frameWrites[i + 1] = {
+    for (uint32_t i=0;i<4;++i) {
+        frameWrites[i+1] = {
             VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET
         };
-        frameWrites[i + 1].dstSet = lightingFrameSet_;
-        frameWrites[i + 1].dstBinding = i + 1;
-        frameWrites[i + 1].descriptorCount = 1;
-        frameWrites[i + 1].descriptorType =
+        frameWrites[i+1].dstSet = lightingFrameSet_;
+        frameWrites[i+1].dstBinding = i+1;
+        frameWrites[i+1].descriptorCount = 1;
+        frameWrites[i+1].descriptorType =
             VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        frameWrites[i + 1].pImageInfo = &iblImages[i];
+        frameWrites[i+1].pImageInfo = &frameImages[i];
     }
 
-    VkDescriptorImageInfo postImage{
+    vkUpdateDescriptorSets(
+        device_,
+        5,
+        frameWrites.data(),
+        0,
+        nullptr
+    );
+
+    const std::array<VkDescriptorImageInfo,2> postImages = {{
+        {
+            linearSampler_,
+            hdrView_,
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+        },
+        {
+            linearSampler_,
+            bloomBView_,
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+        }
+    }};
+
+    const std::array<VkWriteDescriptorSet,2> postWrites = {{
+        {
+            VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            nullptr,
+            postSet_,
+            0,
+            0,
+            1,
+            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            &postImages[0],
+            nullptr,
+            nullptr
+        },
+        {
+            VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            nullptr,
+            postSet_,
+            1,
+            0,
+            1,
+            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            &postImages[1],
+            nullptr,
+            nullptr
+        }
+    }};
+
+    vkUpdateDescriptorSets(
+        device_,
+        2,
+        postWrites.data(),
+        0,
+        nullptr
+    );
+
+    VkDescriptorImageInfo downImage{
         linearSampler_,
         hdrView_,
         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
     };
 
-    VkWriteDescriptorSet postWrite{
+    VkWriteDescriptorSet downWrite{
         VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET
     };
-    postWrite.dstSet = postSet_;
-    postWrite.dstBinding = 0;
-    postWrite.descriptorCount = 1;
-    postWrite.descriptorType =
+    downWrite.dstSet = bloomDownSet_;
+    downWrite.dstBinding = 0;
+    downWrite.descriptorCount = 1;
+    downWrite.descriptorType =
         VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    postWrite.pImageInfo = &postImage;
+    downWrite.pImageInfo = &downImage;
+
+    VkDescriptorImageInfo upImage{
+        linearSampler_,
+        bloomAView_,
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+    };
+
+    VkWriteDescriptorSet upWrite{
+        VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET
+    };
+    upWrite.dstSet = bloomUpSet_;
+    upWrite.dstBinding = 0;
+    upWrite.descriptorCount = 1;
+    upWrite.descriptorType =
+        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    upWrite.pImageInfo = &upImage;
 
     vkUpdateDescriptorSets(
         device_,
-        static_cast<uint32_t>(inputWrites.size()),
-        inputWrites.data(),
-        0,
-        nullptr
-    );
-
-    vkUpdateDescriptorSets(
-        device_,
-        static_cast<uint32_t>(frameWrites.size()),
-        frameWrites.data(),
+        1,
+        &downWrite,
         0,
         nullptr
     );
@@ -1812,7 +2052,7 @@ bool VulkanRenderer::CreateDescriptorPoolAndSets() {
     vkUpdateDescriptorSets(
         device_,
         1,
-        &postWrite,
+        &upWrite,
         0,
         nullptr
     );
