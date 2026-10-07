@@ -1733,32 +1733,31 @@ bool VulkanRenderer::CreateDescriptorPoolAndSets() {
     }
 
     // Lighting input attachments.
+    VkDescriptorSetAllocateInfo inputAllocate{
+        VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO
+    };
+    inputAllocate.descriptorPool = descriptorPool_;
+    inputAllocate.descriptorSetCount = 1;
+    inputAllocate.pSetLayouts = &lightingInputLayout_;
+
     if (vkAllocateDescriptorSets(
             device_,
-            &(VkDescriptorSetAllocateInfo{
-                VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
-                nullptr,
-                0,
-                descriptorPool_,
-                1,
-                &lightingInputLayout_
-            }),
+            &inputAllocate,
             &lightingInputSet_
         ) != VK_SUCCESS) {
         return false;
     }
 
-    // Per-frame lighting UBO + IBL + CSM.
+    VkDescriptorSetAllocateInfo frameAllocate{
+        VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO
+    };
+    frameAllocate.descriptorPool = descriptorPool_;
+    frameAllocate.descriptorSetCount = 1;
+    frameAllocate.pSetLayouts = &lightingFrameLayout_;
+
     if (vkAllocateDescriptorSets(
             device_,
-            &(VkDescriptorSetAllocateInfo{
-                VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
-                nullptr,
-                0,
-                descriptorPool_,
-                1,
-                &lightingFrameLayout_
-            }),
+            &frameAllocate,
             &lightingFrameSet_
         ) != VK_SUCCESS) {
         return false;
