@@ -587,72 +587,389 @@ bool VulkanRenderer::CreateFrames() {
 bool VulkanRenderer::BeginFrame() {
     if (!initialized_ || begun_ || !swapchain_ || !surface_) return false;
 
-    auto& f = frames_[frame_];
-    if (vkWaitForFences(device_, 1, &f.fence, VK_TRUE, UINT64_MAX) != VK_SUCCESS) return false;
+    Frame& frame = frames_[frame_];
 
-    VkResult r = vkAcquireNextImageKHR(
-        device_, swapchain_, UINT64_MAX, f.imageAvailable, VK_NULL_HANDLE, &image_);
-    if (r == VK_ERROR_OUT_OF_DATE_KHR || r == VK_SUBOPTIMAL_KHR) {
-        AETHERIS_VK_LOGW("Acquire returned %s; recreating swapchain", VkResultName(r));
+    if (vkWaitForFences(device_, 1, &frame.fence, VK_TRUE, UINT64_MAX) != VK_SUCCESS)
+        return false;
+
+    const VkResult acquire = vkAcquireNextImageKHR(
+        device_, swapchain_, UINT64_MAX, frame.imageAvailable, VK_NULL_HANDLE, &image_);
+
+    if (acquire == VK_ERROR_OUT_OF_DATE_KHR || acquire == VK_SUBOPTIMAL_KHR) {
+        AETHERIS_VK_LOGW("Acquire returned %s; rebuilding swapchain", VkResultName(acquire));
         RecreateSwapchain(nullptr);
         return false;
     }
-    if (r != VK_SUCCESS) {
-        AETHERIS_VK_LOGE("vkAcquireNextImageKHR failed: %s", VkResultName(r));
+
+    if (acquire != VK_SUCCESS) {
+        AETHERIS_VK_LOGE("vkAcquireNextImageKHR failed: %s", VkResultName(acquire));
         return false;
     }
 
-    vkResetFences(device_, 1, &f.fence);
-    vkResetCommandPool(device_, f.pool, 0);
-    if (!Record(f.cmd, image_)) return false;
+    vkResetFences(device_, 1, &frame.fence);
+    vkResetCommandPool(device_, frame.pool, 0);
+
+    VkCommandBufferBeginInfo beginInfo{
+        VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO
+    };
+
+    if (vkBeginCommandBuffer(frame.cmd, &beginInfo) != VK_SUCCESS)
+        return false;
+
+    UpdateCamera();
+
+    std::array<VkClearValue, 5> clears{};
+    clears[0].color = {{0.0f, 0.0f, 0.0f, 0.0f}};
+    clears[1].color = {{0.5f, 0.5f, 1.0f, 0.55f}};
+    clears[2].color = {{0.10f, 0.13f, 0.18f, 1.0f}};
+    clears[3].depthStencil = {1.0f, 0};
+    clears[4].color = {{0.0f, 0.0f, 0.0f, 1.0f}};
+
+    VkRenderPassBeginInfo renderPassBegin{
+        VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO
+    };
+
+    renderPassBegin.renderPass = pass_;
+    renderPassBegin.framebuffer = framebuffers_[image_];
+    renderPassBegin.renderArea.extent = extent_;
+    renderPassBegin.clearValueCount = static_cast<uint32_t>(clears.size());
+    renderPassBegin.pClearValues = clears.data();
+
+    vkCmdBeginRenderPass(
+        frame.cmd,
+        &renderPassBegin,
+        VK_SUBPASS_CONTENTS_INLINE
+    );
+
+    VkViewport viewport{
+        0.0f, 0.0f,
+        static_cast<float>(extent_.width),
+        static_cast<float>(extent_.height),
+        0.0f, 1.0f
+    };
+
+    VkRect2D scissor{{0, 0}, extent_};
+
+    vkCmdSetViewport(frame.cmd, 0, 1, &viewport);
+    vkCmdSetScissor(frame.cmd, 0, 1, &scissor);
 
     begun_ = true;
+    mainRenderPassActive_ = true;
+    frameRecorded_ = false;
+
     return true;
 }
 
-void VulkanRenderer::DrawRenderQueue(const RenderQueue&) {
-    // RenderGraph passes bind pipelines and issue draws here. No allocations per frame.
+void VulkanRenderer::DrawRenderQueue(
+    const RenderQueue& queue,
+    std::span<const Transform> transforms
+) {
+    if (!begun_ || !mainRenderPassActive_ || frameRecorded_)
+        return;
+
+    if (!UpdateFrameUniforms())
+        return;
+
+    Frame& frame = frames_[frame_];
+
+    vkCmdBindPipeline(
+        frame.cmd,
+        VK_PIPELINE_BIND_POINT_GRAPHICS,
+        geometryPipeline_
+    );
+
+    uint32_t boundMesh = UINT32_MAX;
+
+    for (const RenderItem& item : queue.Items()) {
+        if (item.meshId >= kMaxDemoMeshes ||
+            item.transformIndex >= transforms.size()) {
+            continue;
+        }
+
+        const MeshGpu& mesh = demoMeshes_[item.meshId];
+
+        if (!mesh.vertex.buffer ||
+            !mesh.index.buffer ||
+            mesh.indexCount == 0) {
+            continue;
+        }
+
+        if (boundMesh != item.meshId) {
+            const VkBuffer vertexBuffer = mesh.vertex.buffer;
+            const VkDeviceSize offset = 0;
+
+            vkCmdBindVertexBuffers(
+                frame.cmd, 0, 1, &vertexBuffer, &offset);
+
+            vkCmdBindIndexBuffer(
+                frame.cmd,
+                mesh.index.buffer,
+                0,
+                VK_INDEX_TYPE_UINT32
+            );
+
+            boundMesh = item.meshId;
+        }
+
+        struct alignas(16) GeometryPush final {
+            Mat4 viewProj{};
+            Mat4 model{};
+        };
+
+        static_assert(sizeof(GeometryPush) == 128);
+
+        const Transform& transform =
+            transforms[item.transformIndex];
+
+        GeometryPush constants{};
+        constants.viewProj = viewProj_;
+        constants.model = MakeModel(transform);
+
+        vkCmdPushConstants(
+            frame.cmd,
+            geometryLayout_,
+            VK_SHADER_STAGE_VERTEX_BIT,
+            0,
+            sizeof(constants),
+            &constants
+        );
+
+        vkCmdDrawIndexed(
+            frame.cmd,
+            mesh.indexCount,
+            1,
+            0,
+            0,
+            0
+        );
+    }
+
+    vkCmdNextSubpass(
+        frame.cmd,
+        VK_SUBPASS_CONTENTS_INLINE
+    );
+
+    vkCmdBindPipeline(
+        frame.cmd,
+        VK_PIPELINE_BIND_POINT_GRAPHICS,
+        lightingPipeline_
+    );
+
+    const uint32_t dynamicOffset =
+        static_cast<uint32_t>(frame_ * frameUboStride_);
+
+    vkCmdBindDescriptorSets(
+        frame.cmd,
+        VK_PIPELINE_BIND_POINT_GRAPHICS,
+        lightingLayout_,
+        0,
+        1,
+        &lightingInputSet_,
+        0,
+        nullptr
+    );
+
+    vkCmdBindDescriptorSets(
+        frame.cmd,
+        VK_PIPELINE_BIND_POINT_GRAPHICS,
+        lightingLayout_,
+        1,
+        1,
+        &lightingFrameSet_,
+        1,
+        &dynamicOffset
+    );
+
+    // Full-screen triangle invokes deferred_lighting_mobile.frag.
+    vkCmdDraw(frame.cmd, 3, 1, 0, 0);
+
+    vkCmdEndRenderPass(frame.cmd);
+    mainRenderPassActive_ = false;
+
+    VkImageMemoryBarrier hdrBarrier{
+        VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER
+    };
+
+    hdrBarrier.srcAccessMask =
+        VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    hdrBarrier.dstAccessMask =
+        VK_ACCESS_SHADER_READ_BIT;
+    hdrBarrier.oldLayout =
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    hdrBarrier.newLayout =
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    hdrBarrier.srcQueueFamilyIndex =
+        VK_QUEUE_FAMILY_IGNORED;
+    hdrBarrier.dstQueueFamilyIndex =
+        VK_QUEUE_FAMILY_IGNORED;
+    hdrBarrier.image = hdrImage_;
+    hdrBarrier.subresourceRange = {
+        VK_IMAGE_ASPECT_COLOR_BIT,
+        0, 1, 0, 1
+    };
+
+    vkCmdPipelineBarrier(
+        frame.cmd,
+        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+        0,
+        0, nullptr,
+        0, nullptr,
+        1, &hdrBarrier
+    );
+
+    VkClearValue postClear{};
+    postClear.color = {{0.0f, 0.0f, 0.0f, 1.0f}};
+
+    VkRenderPassBeginInfo postBegin{
+        VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO
+    };
+
+    postBegin.renderPass = postPass_;
+    postBegin.framebuffer = postFramebuffers_[image_];
+    postBegin.renderArea.extent = extent_;
+    postBegin.clearValueCount = 1;
+    postBegin.pClearValues = &postClear;
+
+    vkCmdBeginRenderPass(
+        frame.cmd,
+        &postBegin,
+        VK_SUBPASS_CONTENTS_INLINE
+    );
+
+    VkViewport viewport{
+        0.0f, 0.0f,
+        static_cast<float>(extent_.width),
+        static_cast<float>(extent_.height),
+        0.0f, 1.0f
+    };
+
+    VkRect2D scissor{{0, 0}, extent_};
+
+    vkCmdSetViewport(frame.cmd, 0, 1, &viewport);
+    vkCmdSetScissor(frame.cmd, 0, 1, &scissor);
+
+    vkCmdBindPipeline(
+        frame.cmd,
+        VK_PIPELINE_BIND_POINT_GRAPHICS,
+        postPipeline_
+    );
+
+    vkCmdBindDescriptorSets(
+        frame.cmd,
+        VK_PIPELINE_BIND_POINT_GRAPHICS,
+        postLayout_,
+        0,
+        1,
+        &postSet_,
+        0,
+        nullptr
+    );
+
+    const PostPushConstants post{
+        1.15f,
+        1.0f / std::max(1.0f, static_cast<float>(extent_.width)),
+        1.0f / std::max(1.0f, static_cast<float>(extent_.height)),
+        0.22f
+    };
+
+    vkCmdPushConstants(
+        frame.cmd,
+        postLayout_,
+        VK_SHADER_STAGE_FRAGMENT_BIT,
+        0,
+        sizeof(post),
+        &post
+    );
+
+    vkCmdDraw(frame.cmd, 3, 1, 0, 0);
+    vkCmdEndRenderPass(frame.cmd);
+
+    frameRecorded_ = true;
 }
 
 void VulkanRenderer::EndFrame() {
     if (!begun_) return;
 
-    auto& f = frames_[frame_];
-    VkPipelineStageFlags stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    Frame& frame = frames_[frame_];
 
-    VkSubmitInfo s{VK_STRUCTURE_TYPE_SUBMIT_INFO};
-    s.waitSemaphoreCount = 1;
-    s.pWaitSemaphores = &f.imageAvailable;
-    s.pWaitDstStageMask = &stage;
-    s.commandBufferCount = 1;
-    s.pCommandBuffers = &f.cmd;
-    s.signalSemaphoreCount = 1;
-    s.pSignalSemaphores = &f.renderFinished;
+    if (mainRenderPassActive_) {
+        vkCmdEndRenderPass(frame.cmd);
+        mainRenderPassActive_ = false;
+    }
 
-    const VkResult submitResult = vkQueueSubmit(queue_, 1, &s, f.fence);
-    if (submitResult != VK_SUCCESS) {
-        AETHERIS_VK_LOGE("vkQueueSubmit failed: %s", VkResultName(submitResult));
+    if (vkEndCommandBuffer(frame.cmd) != VK_SUCCESS) {
         begun_ = false;
+        frameRecorded_ = false;
         return;
     }
 
-    VkPresentInfoKHR p{VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};
-    p.waitSemaphoreCount = 1;
-    p.pWaitSemaphores = &f.renderFinished;
-    p.swapchainCount = 1;
-    p.pSwapchains = &swapchain_;
-    p.pImageIndices = &image_;
+    const VkPipelineStageFlags waitStage =
+        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
 
-    VkResult r = vkQueuePresentKHR(queue_, &p);
-    if (r == VK_ERROR_OUT_OF_DATE_KHR || r == VK_SUBOPTIMAL_KHR) {
-        AETHERIS_VK_LOGW("Present returned %s; rebuilding swapchain", VkResultName(r));
+    VkSubmitInfo submitInfo{
+        VK_STRUCTURE_TYPE_SUBMIT_INFO
+    };
+
+    submitInfo.waitSemaphoreCount = 1;
+    submitInfo.pWaitSemaphores = &frame.imageAvailable;
+    submitInfo.pWaitDstStageMask = &waitStage;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &frame.cmd;
+    submitInfo.signalSemaphoreCount = 1;
+    submitInfo.pSignalSemaphores = &frame.renderFinished;
+
+    const VkResult submit =
+        vkQueueSubmit(
+            queue_,
+            1,
+            &submitInfo,
+            frame.fence
+        );
+
+    if (submit != VK_SUCCESS) {
+        AETHERIS_VK_LOGE(
+            "vkQueueSubmit failed: %s",
+            VkResultName(submit)
+        );
+        begun_ = false;
+        frameRecorded_ = false;
+        return;
+    }
+
+    VkPresentInfoKHR presentInfo{
+        VK_STRUCTURE_TYPE_PRESENT_INFO_KHR
+    };
+
+    presentInfo.waitSemaphoreCount = 1;
+    presentInfo.pWaitSemaphores = &frame.renderFinished;
+    presentInfo.swapchainCount = 1;
+    presentInfo.pSwapchains = &swapchain_;
+    presentInfo.pImageIndices = &image_;
+
+    const VkResult present =
+        vkQueuePresentKHR(
+            queue_,
+            &presentInfo
+        );
+
+    if (present == VK_ERROR_OUT_OF_DATE_KHR ||
+        present == VK_SUBOPTIMAL_KHR) {
+        AETHERIS_VK_LOGW(
+            "Present returned %s; rebuilding swapchain",
+            VkResultName(present)
+        );
         RecreateSwapchain(nullptr);
-    } else if (r != VK_SUCCESS) {
-        AETHERIS_VK_LOGE("vkQueuePresentKHR failed: %s", VkResultName(r));
+    } else if (present != VK_SUCCESS) {
+        AETHERIS_VK_LOGE(
+            "vkQueuePresentKHR failed: %s",
+            VkResultName(present)
+        );
     }
 
     frame_ = (frame_ + 1) % Frames;
     begun_ = false;
+    frameRecorded_ = false;
 }
 
 void VulkanRenderer::DestroySwapchain() noexcept {
