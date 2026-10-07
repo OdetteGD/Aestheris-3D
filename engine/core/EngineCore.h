@@ -3,6 +3,8 @@
 #include <memory>
 #include <mutex>
 #include <filesystem>
+#include <atomic>
+#include <thread>
 namespace aetheris {
 class EngineCore final {
  std::unique_ptr<IAetherisRenderer> activeRenderer_;
@@ -10,9 +12,15 @@ class EngineCore final {
  SceneSnapshot scene_;
  mutable std::mutex mutex_;
  bool frameActive_{};
+ std::atomic_bool renderStop_{true};
+ std::thread renderThread_{};
  std::filesystem::path projectRoot_{};
  std::unique_ptr<IAetherisRenderer> MakeRenderer(RenderAPI);
  bool CreateRendererLocked(RenderAPI,ANativeWindow*);
+ void RenderLoop() noexcept;
+ void StartRenderLoopLocked();
+ void StopRenderLoop() noexcept;
+ void RenderOneFrameLocked();
  EngineCore()=default;
 public:
  static EngineCore& Instance() noexcept;
