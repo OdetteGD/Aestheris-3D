@@ -1,5 +1,6 @@
 #pragma once
 #include "engine/renderer/IAetherisRenderer.h"
+#include "engine/world/DemoWorldInitializer.h"
 #include <memory>
 #include <mutex>
 #include <filesystem>
@@ -15,6 +16,8 @@ class EngineCore final {
  std::atomic_bool renderStop_{true};
  std::atomic_bool surfaceReady_{false};
  std::thread renderThread_{};
+ DemoWorldInitializer demoWorld_{};
+ bool demoWorldInitialized_{false};
  std::filesystem::path projectRoot_{};
  std::unique_ptr<IAetherisRenderer> MakeRenderer(RenderAPI);
  bool CreateRendererLocked(RenderAPI,ANativeWindow*);
