@@ -1313,17 +1313,20 @@ bool VulkanRenderer::CreateHDRTarget() {
 bool VulkanRenderer::CreateShaderModules() {
     ShaderResourceManager shaders{};
 
-    struct ShaderFile final {
+    struct ShaderFile {
         const char* name;
         VkShaderModule* output;
     };
 
-    const std::array<ShaderFile, 5> files = {{
+    const std::array<ShaderFile, 8> files = {{
         {"gbuffer_mobile.vert.spv", &geometryVert_},
         {"gbuffer_mobile.frag.spv", &geometryFrag_},
         {"fullscreen_triangle.vert.spv", &fullscreenVert_},
         {"deferred_lighting_mobile.frag.spv", &lightingFrag_},
-        {"bloom_aces_mobile.frag.spv", &postFrag_}
+        {"shadow_mobile.vert.spv", &shadowVert_},
+        {"shadow_mobile.frag.spv", &shadowFrag_},
+        {"bloom_downsample_mobile.frag.spv", &bloomDownFrag_},
+        {"bloom_upsample_mobile.frag.spv", &bloomUpFrag_}
     }};
 
     const std::filesystem::path root =
@@ -1333,8 +1336,7 @@ bool VulkanRenderer::CreateShaderModules() {
 
     for (const ShaderFile& file : files) {
         std::vector<uint32_t> words{};
-        const std::filesystem::path path =
-            root / file.name;
+        const auto path = root / file.name;
 
         if (!shaders.LoadSPIRV(path, words) ||
             !ShaderResourceManager::ValidateSPIRV(words)) {
@@ -1350,13 +1352,15 @@ bool VulkanRenderer::CreateShaderModules() {
         };
         info.codeSize =
             words.size() * sizeof(uint32_t);
-        info.pCode = words.data();
+        info.pCode =
+            words.data();
 
         if (vkCreateShaderModule(
                 device_,
                 &info,
                 nullptr,
-                file.output) != VK_SUCCESS) {
+                file.output
+            ) != VK_SUCCESS) {
             AETHERIS_VK_LOGE(
                 "vkCreateShaderModule failed: %s",
                 file.name
@@ -1365,6 +1369,43 @@ bool VulkanRenderer::CreateShaderModules() {
         }
     }
 
+    // The post shader is intentionally loaded last because Android's shader
+    // compiler emits the canonical file name from the source stem.
+    {
+        std::vector<uint32_t> words{};
+        const auto path =
+            root /
+            "post_aces_bloom_mobile.frag.spv";
+
+        if (!shaders.LoadSPIRV(path, words) ||
+            !ShaderResourceManager::ValidateSPIRV(words)) {
+            AETHERIS_VK_LOGE(
+                "SPIR-V load failed: %s",
+                path.string().c_str()
+            );
+            return false;
+        }
+
+        VkShaderModuleCreateInfo info{
+            VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO
+        };
+        info.codeSize =
+            words.size() * sizeof(uint32_t);
+        info.pCode =
+            words.data();
+
+        if (vkCreateShaderModule(
+                device_,
+                &info,
+                nullptr,
+                &postFrag_
+            ) != VK_SUCCESS) {
+            return false;
+        }
+    }
+
+    // Full-screen vertex shader is shared by lighting and both bloom filters.
+    // Geometry and shadow stages never compile or load shaders at frame time.
     return true;
 }
 
@@ -2471,7 +2512,6 @@ bool VulkanRenderer::CreateDemoMeshes() {
 
 bool VulkanRenderer::CreateFrameUniformBuffer() {
     VkPhysicalDeviceProperties properties{};
-
     vkGetPhysicalDeviceProperties(
         gpu_,
         &properties
@@ -2483,12 +2523,16 @@ bool VulkanRenderer::CreateFrameUniformBuffer() {
             16
         );
 
-    const VkDeviceSize size =
+    const VkDeviceSize blockSize =
         sizeof(std140::DeferredFrameBlock);
 
     frameUboStride_ =
-        ((size + alignment - 1) /
-         alignment) *
+        (
+            blockSize +
+            alignment -
+            1
+        ) /
+        alignment *
         alignment;
 
     VkBufferCreateInfo info{
