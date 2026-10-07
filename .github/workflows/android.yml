@@ -127,24 +127,30 @@ jobs:
             local rid="$1"
             local abi_dir="$2"
             local package_id="microsoft.netcore.app.runtime.mono.${rid}"
+            local package_spec="Microsoft.NETCore.App.Runtime.Mono.${rid}"
             local temp_dir
             temp_dir="$(mktemp -d)"
 
-            pushd "${temp_dir}" >/dev/null
-            dotnet new classlib --framework net10.0 --no-restore --force >/dev/null
-            dotnet add package "Microsoft.NETCore.App.Runtime.Mono.${rid}" \
-              --version "${DOTNET_MONO_RUNTIME_VERSION}" \
-              --no-restore >/dev/null
-            dotnet restore --nologo >/dev/null
-            popd >/dev/null
+            cat > "${temp_dir}/RuntimePackProbe.csproj" <<EOF
+          <Project Sdk="Microsoft.NET.Sdk">
+            <PropertyGroup>
+              <TargetFramework>net10.0</TargetFramework>
+            </PropertyGroup>
+            <ItemGroup>
+              <PackageReference Include="${package_spec}" Version="${DOTNET_MONO_RUNTIME_VERSION}" />
+            </ItemGroup>
+          </Project>
+          EOF
 
-            local package_root=
-            package_root="$(find "${HOME}/.nuget/packages/${package_id}" \
-              -maxdepth 2 -mindepth 2 -type d \
-              -name "${DOTNET_MONO_RUNTIME_VERSION}" \
-              -print -quit)"
+            local package_cache="${temp_dir}/packages"
+            mkdir -p "${package_cache}"
 
-            test -n "${package_root}"
+            dotnet restore "${temp_dir}/RuntimePackProbe.csproj" \
+              --packages "${package_cache}" \
+              --nologo
+
+            local package_root="${package_cache}/${package_id}/${DOTNET_MONO_RUNTIME_VERSION}"
+            test -d "${package_root}"
             test -d "${package_root}/runtimes/${rid}/native"
 
             mapfile -t native_libs < <(
@@ -159,9 +165,8 @@ jobs:
             done
 
             test -s "app/src/main/jniLibs/${abi_dir}/libmonosgen-2.0.so"
-            rm -rf "${temp_dir}"
+            echo "Staged Mono runtime ${package_spec} ${DOTNET_MONO_RUNTIME_VERSION} -> ${abi_dir}"
           }
-
           stage_mono_runtime "android-arm64" "arm64-v8a"
           stage_mono_runtime "android-arm" "armeabi-v7a"
 
