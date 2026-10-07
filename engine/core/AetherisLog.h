@@ -1,5 +1,7 @@
 #pragma once
 
+// Centralized Android diagnostics for the single native engine boundary.
+
 #include <android/log.h>
 
 #ifndef AETHERIS_LOG_TAG
