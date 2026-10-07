@@ -5734,7 +5734,11 @@ bool VulkanRenderer::UpdateFrameUniforms() noexcept {
         csmSplits_[0],
         csmSplits_[1],
         csmSplits_[2],
-        0.0f
+        static_cast<float>(
+            prefilteredMipLevels_ > 0
+                ? prefilteredMipLevels_ - 1
+                : 0
+        )
     };
 
     const VkDeviceSize offset =
