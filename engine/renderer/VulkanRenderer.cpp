@@ -51,7 +51,7 @@ constexpr const char* kValidationLayer = "VK_LAYER_KHRONOS_validation";
 
 bool VulkanRenderer::Initialize(ANativeWindow* w) {
     if (initialized_ || !w) return false;
-    AETHERIS_VK_LOGI("Initialize: native window=%p", static_cast<void*>(w));
+
     window_ = w;
     ANativeWindow_acquire(window_);
 
@@ -60,40 +60,205 @@ bool VulkanRenderer::Initialize(ANativeWindow* w) {
         !PickGPU() ||
         !CreateDevice() ||
         !resources_.Initialize(
-            gpu_,
-            device_,
+            gpu_, device_,
             projectRoot_.empty()
                 ? std::filesystem::path("cache/pipelines/aetheris_vk.bin")
-                : projectRoot_ / "cache/pipelines/aetheris_vk.bin") ||
+                : projectRoot_ / "cache/pipelines/aetheris_vk.bin"
+        ) ||
         !CreateFrames() ||
-        !CreateFrameUniformBuffer() ||
-        !CreateShaderModules() ||
-        !CreateDescriptorLayouts() ||
-        !CreateDefaultIBL() ||
-        !CreateMaterialResources() ||
-        !CreateCSMResources() ||
-        !CreateDemoMeshes() ||
         !CreateSwapchain() ||
-        !CreateGBufferAttachments() ||
-        !CreateHDRTarget() ||
-        !CreateSSAOTarget() ||
-        !CreateBloomResources() ||
-        !CreatePasses() ||
         !CreateViews() ||
-        !CreateFramebuffers() ||
-        !CreateDescriptorPoolAndSets() ||
-        !CreatePipelines()) {
-        AETHERIS_VK_LOGE("Vulkan initialization failed");
+        !CreateSafePresentationResources()) {
+        AETHERIS_VK_LOGE("Surface-gated Vulkan bootstrap failed");
         Shutdown();
         return false;
     }
 
     initialized_ = true;
+    deferredResourcesReady_ = false;
+    deferredResourcesFailed_ = false;
+    resourceState_ = ResourceState::SurfaceReady;
+    begun_ = false;
+    mainRenderPassActive_ = false;
+    frameRecorded_ = false;
     UpdateCamera();
-    AETHERIS_VK_LOGI("Initialize complete: %ux%u, swapchain=%zu",
-                      extent_.width, extent_.height, images_.size());
+
+    AETHERIS_VK_LOGI(
+        "Vulkan surface/device ready; deferred GPU resources pending"
+    );
     return true;
 }
+
+bool VulkanRenderer::EnsureDeferredResources() {
+    if (!initialized_ || !surface_ || !swapchain_)
+        return false;
+    if (deferredResourcesReady_)
+        return true;
+    if (deferredResourcesFailed_)
+        return false;
+
+    resourceState_ = ResourceState::AllocatingAssets;
+
+    if (!EnsureDeferredResourcesInternal()) {
+        deferredResourcesReady_ = false;
+        deferredResourcesFailed_ = true;
+        resourceState_ = ResourceState::Failed;
+        DestroyDeferredResources();
+        return false;
+    }
+
+    deferredResourcesReady_ = true;
+    deferredResourcesFailed_ = false;
+    resourceState_ = ResourceState::Rendering;
+    UpdateCamera();
+    return true;
+}
+
+bool VulkanRenderer::IsReady() const noexcept {
+    return initialized_ &&
+        surface_ != VK_NULL_HANDLE &&
+        swapchain_ != VK_NULL_HANDLE &&
+        deferredResourcesReady_;
+}
+
+bool VulkanRenderer::EnsureDeferredResourcesInternal() {
+    if (!CreateFrameUniformBuffer()) return false;
+    if (!CreateShaderModules()) return false;
+    if (!CreateDescriptorLayouts()) return false;
+    if (!CreateDefaultIBL()) return false;
+    if (!CreateMaterialResources()) return false;
+    if (!CreateCSMResources()) return false;
+    if (!CreateDemoMeshes()) return false;
+    if (!CreateGBufferAttachments()) return false;
+    if (!CreateHDRTarget()) return false;
+    if (!CreateSSAOTarget()) return false;
+    if (!CreateBloomResources()) return false;
+    if (!CreatePasses()) return false;
+    if (!CreateFramebuffers()) return false;
+    if (!CreateDescriptorPoolAndSets()) return false;
+    if (!CreatePipelines()) return false;
+    return true;
+}
+
+bool VulkanRenderer::CreateSafePresentationResources() {
+    if (!device_ || views_.empty())
+        return false;
+
+    VkAttachmentDescription attachment{};
+    attachment.format = format_;
+    attachment.samples = VK_SAMPLE_COUNT_1_BIT;
+    attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    attachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    attachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+
+    VkAttachmentReference color{
+        0,
+        VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+    };
+
+    VkSubpassDescription subpass{};
+    subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    subpass.colorAttachmentCount = 1;
+    subpass.pColorAttachments = &color;
+
+    const VkSubpassDependency dependency{
+        VK_SUBPASS_EXTERNAL,
+        0,
+        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+        0,
+        VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+        VK_DEPENDENCY_BY_REGION_BIT
+    };
+
+    VkRenderPassCreateInfo info{
+        VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO
+    };
+    info.attachmentCount = 1;
+    info.pAttachments = &attachment;
+    info.subpassCount = 1;
+    info.pSubpasses = &subpass;
+    info.dependencyCount = 1;
+    info.pDependencies = &dependency;
+
+    if (vkCreateRenderPass(
+            device_, &info, nullptr, &safePass_
+        ) != VK_SUCCESS) {
+        safePass_ = VK_NULL_HANDLE;
+        return false;
+    }
+
+    safeFramebuffers_.resize(views_.size());
+
+    for (size_t i=0; i<views_.size(); ++i) {
+        VkFramebufferCreateInfo fb{
+            VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO
+        };
+        fb.renderPass = safePass_;
+        fb.attachmentCount = 1;
+        fb.pAttachments = &views_[i];
+        fb.width = extent_.width;
+        fb.height = extent_.height;
+        fb.layers = 1;
+
+        if (vkCreateFramebuffer(
+                device_, &fb, nullptr, &safeFramebuffers_[i]
+            ) != VK_SUCCESS) {
+            DestroySafePresentationResources();
+            return false;
+        }
+    }
+
+    return true;
+}
+
+void VulkanRenderer::DestroySafePresentationResources() noexcept {
+    if (!device_) return;
+    for (VkFramebuffer framebuffer : safeFramebuffers_) {
+        if (framebuffer)
+            vkDestroyFramebuffer(device_, framebuffer, nullptr);
+    }
+    safeFramebuffers_.clear();
+
+    if (safePass_)
+        vkDestroyRenderPass(device_, safePass_, nullptr);
+
+    safePass_ = VK_NULL_HANDLE;
+}
+
+bool VulkanRenderer::RecordSafeClear() {
+    if (!begun_ ||
+        image_ == UINT32_MAX ||
+        image_ >= safeFramebuffers_.size() ||
+        !safePass_) return false;
+
+    Frame& frame = frames_[frame_];
+
+    VkClearValue clear{};
+    clear.color = {{0.02f,0.045f,0.085f,1.0f}};
+
+    VkRenderPassBeginInfo begin{
+        VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO
+    };
+    begin.renderPass = safePass_;
+    begin.framebuffer = safeFramebuffers_[image_];
+    begin.renderArea.extent = extent_;
+    begin.clearValueCount = 1;
+    begin.pClearValues = &clear;
+
+    vkCmdBeginRenderPass(
+        frame.cmd,
+        &begin,
+        VK_SUBPASS_CONTENTS_INLINE
+    );
+    vkCmdEndRenderPass(frame.cmd);
+    frameRecorded_ = true;
+    return true;
+}
+
 
 bool VulkanRenderer::CreateInstance() {
     uint32_t n = 0;
@@ -1112,6 +1277,11 @@ void VulkanRenderer::DrawRenderQueue(
     if(!begun_ || frameRecorded_)
         return;
 
+    if (!deferredResourcesReady_) {
+        RecordSafeClear();
+        return;
+    }
+
     if (!UpdateFrameUniforms())
         return;
 
@@ -2014,146 +2184,40 @@ void VulkanRenderer::DestroySwapchain() noexcept {
     if (!device_) return;
 
     vkDeviceWaitIdle(device_);
+    DestroyDeferredResources();
+    DestroySafePresentationResources();
 
-    DestroyPipelines();
-    DestroyDescriptors();
-    DestroyBloomResources();
-
-    for (VkFramebuffer fb : postFramebuffers_)
-        if (fb)
-            vkDestroyFramebuffer(
-                device_,
-                fb,
-                nullptr
-            );
-
-    for (VkFramebuffer fb : framebuffers_)
-        if (fb)
-            vkDestroyFramebuffer(
-                device_,
-                fb,
-                nullptr
-            );
-
-    if (ssaoFramebuffer_)
-        vkDestroyFramebuffer(
-            device_,
-            ssaoFramebuffer_,
-            nullptr
-        );
-
-    if (geometryFramebuffer_)
-        vkDestroyFramebuffer(
-            device_,
-            geometryFramebuffer_,
-            nullptr
-        );
-
-    if (postPass_)
-        vkDestroyRenderPass(
-            device_,
-            postPass_,
-            nullptr
-        );
-
-    if (pass_)
-        vkDestroyRenderPass(
-            device_,
-            pass_,
-            nullptr
-        );
-
-    if (ssaoPass_)
-        vkDestroyRenderPass(
-            device_,
-            ssaoPass_,
-            nullptr
-        );
-
-    if (geometryPass_)
-        vkDestroyRenderPass(
-            device_,
-            geometryPass_,
-            nullptr
-        );
-
-    if (hdrView_)
-        vkDestroyImageView(
-            device_,
-            hdrView_,
-            nullptr
-        );
-
-    if (hdrImage_)
-        vkDestroyImage(
-            device_,
-            hdrImage_,
-            nullptr
-        );
-
-    if (hdrMemory_)
-        vkFreeMemory(
-            device_,
-            hdrMemory_,
-            nullptr
-        );
-
-    hdrView_ = VK_NULL_HANDLE;
-    hdrImage_ = VK_NULL_HANDLE;
-    hdrMemory_ = VK_NULL_HANDLE;
-
-    DestroySSAOTarget();
-    DestroyGBufferAttachments();
-
-    for (VkImageView view : views_)
+    for (VkImageView view : views_) {
         if (view)
-            vkDestroyImageView(
-                device_,
-                view,
-                nullptr
-            );
-
-    if (swapchain_)
-        vkDestroySwapchainKHR(
-            device_,
-            swapchain_,
-            nullptr
-        );
-
-    geometryFramebuffer_ = VK_NULL_HANDLE;
-    ssaoFramebuffer_ = VK_NULL_HANDLE;
-    geometryPass_ = VK_NULL_HANDLE;
-    ssaoPass_ = VK_NULL_HANDLE;
-    postPass_ = VK_NULL_HANDLE;
-    pass_ = VK_NULL_HANDLE;
-    swapchain_ = VK_NULL_HANDLE;
-
-    framebuffers_.clear();
-    postFramebuffers_.clear();
+            vkDestroyImageView(device_, view, nullptr);
+    }
     views_.clear();
     images_.clear();
+
+    if (swapchain_)
+        vkDestroySwapchainKHR(device_, swapchain_, nullptr);
+
+    swapchain_ = VK_NULL_HANDLE;
+    format_ = VK_FORMAT_UNDEFINED;
+    extent_ = {};
     image_ = UINT32_MAX;
+    begun_ = false;
+    frameRecorded_ = false;
+    mainRenderPassActive_ = false;
+    deferredResourcesReady_ = false;
+    deferredResourcesFailed_ = false;
+    resourceState_ = ResourceState::SurfaceReady;
 }
 
 bool VulkanRenderer::RecreateSwapchain(ANativeWindow* w) {
-    if (!device_) return false;
-
-    AETHERIS_VK_LOGI(
-        "RecreateSwapchain begin: new=%p old=%p",
-        static_cast<void*>(w),
-        static_cast<void*>(window_)
-    );
+    if (!device_ || !w) return false;
 
     vkDeviceWaitIdle(device_);
     DestroySwapchain();
 
-    if (w && (w != window_ || !surface_)) {
+    if (w != window_) {
         if (surface_) {
-            vkDestroySurfaceKHR(
-                instance_,
-                surface_,
-                nullptr
-            );
+            vkDestroySurfaceKHR(instance_, surface_, nullptr);
             surface_ = VK_NULL_HANDLE;
         }
 
@@ -2167,33 +2231,32 @@ bool VulkanRenderer::RecreateSwapchain(ANativeWindow* w) {
 
         if (!CreateSurface())
             return false;
+    } else if (!surface_) {
+        if (!CreateSurface())
+            return false;
     }
 
-    if (!surface_)
+    VkBool32 supported = VK_FALSE;
+    if (vkGetPhysicalDeviceSurfaceSupportKHR(
+            gpu_, family_, surface_, &supported
+        ) != VK_SUCCESS || supported != VK_TRUE) {
+        AETHERIS_VK_LOGE(
+            "Vulkan queue family cannot present the new Android surface"
+        );
         return false;
+    }
 
-    const bool ok =
-        CreateSwapchain() &&
-        CreateGBufferAttachments() &&
-        CreateHDRTarget() &&
-        CreateBloomResources() &&
-        CreatePasses() &&
-        CreateViews() &&
-        CreateFramebuffers() &&
-        CreateDescriptorPoolAndSets() &&
-        CreatePipelines();
+    if (!CreateSwapchain() ||
+        !CreateViews() ||
+        !CreateSafePresentationResources()) {
+        return false;
+    }
 
-    if (ok)
-        UpdateCamera();
-
-    AETHERIS_VK_LOGI(
-        "RecreateSwapchain complete: result=%d extent=%ux%u",
-        ok ? 1 : 0,
-        extent_.width,
-        extent_.height
-    );
-
-    return ok;
+    deferredResourcesReady_ = false;
+    deferredResourcesFailed_ = false;
+    resourceState_ = ResourceState::SurfaceReady;
+    UpdateCamera();
+    return true;
 }
 
 void VulkanRenderer::ReleaseSurface() noexcept {
@@ -6604,6 +6667,108 @@ void VulkanRenderer::DestroyDemoMeshes() noexcept {
     }
 }
 
+void VulkanRenderer::DestroyDeferredResources() noexcept {
+    if (!device_) return;
+
+    DestroyPipelines();
+    DestroyDescriptors();
+
+    for (VkFramebuffer framebuffer : postFramebuffers_) {
+        if (framebuffer) vkDestroyFramebuffer(device_, framebuffer, nullptr);
+    }
+    for (VkFramebuffer framebuffer : framebuffers_) {
+        if (framebuffer) vkDestroyFramebuffer(device_, framebuffer, nullptr);
+    }
+    if (ssaoFramebuffer_) vkDestroyFramebuffer(device_, ssaoFramebuffer_, nullptr);
+    if (geometryFramebuffer_) vkDestroyFramebuffer(device_, geometryFramebuffer_, nullptr);
+
+    ssaoFramebuffer_ = VK_NULL_HANDLE;
+    geometryFramebuffer_ = VK_NULL_HANDLE;
+    postFramebuffers_.clear();
+    framebuffers_.clear();
+
+    if (postPass_) vkDestroyRenderPass(device_, postPass_, nullptr);
+    if (pass_) vkDestroyRenderPass(device_, pass_, nullptr);
+    if (ssaoPass_) vkDestroyRenderPass(device_, ssaoPass_, nullptr);
+    if (geometryPass_) vkDestroyRenderPass(device_, geometryPass_, nullptr);
+
+    postPass_ = VK_NULL_HANDLE;
+    pass_ = VK_NULL_HANDLE;
+    ssaoPass_ = VK_NULL_HANDLE;
+    geometryPass_ = VK_NULL_HANDLE;
+
+    DestroyBloomResources();
+    DestroySSAOTarget();
+    DestroyGBufferAttachments();
+
+    if (hdrView_) vkDestroyImageView(device_, hdrView_, nullptr);
+    if (hdrImage_) vkDestroyImage(device_, hdrImage_, nullptr);
+    if (hdrMemory_) vkFreeMemory(device_, hdrMemory_, nullptr);
+
+    hdrView_ = VK_NULL_HANDLE;
+    hdrImage_ = VK_NULL_HANDLE;
+    hdrMemory_ = VK_NULL_HANDLE;
+
+    DestroyDemoMeshes();
+    DestroyMaterialResources();
+    DestroyCSMResources();
+    DestroyDefaultIBL();
+    DestroyEnvironment();
+
+    const VkShaderModule shaders[] = {
+        geometryVert_, geometryFrag_, fullscreenVert_, lightingFrag_,
+        postFrag_, shadowVert_, shadowFrag_, ssaoFrag_,
+        bloomDownFrag_, bloomUpFrag_
+    };
+    for (VkShaderModule shader : shaders) {
+        if (shader) vkDestroyShaderModule(device_, shader, nullptr);
+    }
+
+    geometryVert_ = VK_NULL_HANDLE;
+    geometryFrag_ = VK_NULL_HANDLE;
+    fullscreenVert_ = VK_NULL_HANDLE;
+    lightingFrag_ = VK_NULL_HANDLE;
+    postFrag_ = VK_NULL_HANDLE;
+    shadowVert_ = VK_NULL_HANDLE;
+    shadowFrag_ = VK_NULL_HANDLE;
+    ssaoFrag_ = VK_NULL_HANDLE;
+    bloomDownFrag_ = VK_NULL_HANDLE;
+    bloomUpFrag_ = VK_NULL_HANDLE;
+
+    const VkPipelineLayout layouts[] = {
+        geometryLayout_, lightingLayout_, postLayout_,
+        shadowLayout_, ssaoLayout_
+    };
+    for (VkPipelineLayout layout : layouts) {
+        if (layout) vkDestroyPipelineLayout(device_, layout, nullptr);
+    }
+
+    geometryLayout_ = VK_NULL_HANDLE;
+    lightingLayout_ = VK_NULL_HANDLE;
+    postLayout_ = VK_NULL_HANDLE;
+    shadowLayout_ = VK_NULL_HANDLE;
+    ssaoLayout_ = VK_NULL_HANDLE;
+
+    const VkDescriptorSetLayout setLayouts[] = {
+        materialSetLayout_, lightingInputLayout_, lightingFrameLayout_,
+        postSetLayout_, shadowSetLayout_, ssaoSetLayout_
+    };
+    for (VkDescriptorSetLayout layout : setLayouts) {
+        if (layout) vkDestroyDescriptorSetLayout(device_, layout, nullptr);
+    }
+
+    materialSetLayout_ = VK_NULL_HANDLE;
+    lightingInputLayout_ = VK_NULL_HANDLE;
+    lightingFrameLayout_ = VK_NULL_HANDLE;
+    postSetLayout_ = VK_NULL_HANDLE;
+    shadowSetLayout_ = VK_NULL_HANDLE;
+    ssaoSetLayout_ = VK_NULL_HANDLE;
+
+    if (frameUbo_.buffer)
+        resources_.DestroyBuffer(frameUbo_);
+    frameUboStride_ = 64;
+    deferredResourcesReady_ = false;
+}
 void VulkanRenderer::DestroyDefaultIBL() noexcept {
     if (!device_) return;
 

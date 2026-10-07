@@ -198,25 +198,80 @@ bool AetherisRenderGraph::Compile() noexcept {
     return compiled_;
 }
 
-void AetherisRenderGraph::Execute(VkCommandBuffer cmd, RenderGraphContext& context) noexcept {
+void AetherisRenderGraph::Execute(
+    VkCommandBuffer cmd,
+    RenderGraphContext& context
+) noexcept {
     if (!compiled_) return;
-    AETHERIS_LOGD("RenderGraph execute: passes=%u", orderCount_);
-    for (uint32_t oi = 0; oi < orderCount_; ++oi) {
-        const uint32_t pi = order_[oi];
-        const uint32_t count = barrierCounts_[pi];
+
+    for (uint32_t oi=0; oi<orderCount_; ++oi) {
+        const uint32_t pi=order_[oi];
+        const uint32_t count=barrierCounts_[pi];
+
         if (count) {
-            std::array<VkImageMemoryBarrier, 64> ib{};
-            uint32_t ic = 0;
-            for (uint32_t i = 0; i < count; ++i) if (barriers_[pi][i].isImage) ib[ic++] = barriers_[pi][i].image;
-            if (ic) {
-                VkPipelineStageFlags srcStages = 0, dstStages = 0;
-                for (uint32_t i = 0; i < count; ++i) { srcStages |= barriers_[pi][i].srcStage; dstStages |= barriers_[pi][i].dstStage; }
-                if (!srcStages) srcStages = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-                if (!dstStages) dstStages = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
-                vkCmdPipelineBarrier(cmd, srcStages, dstStages, 0, 0, nullptr, 0, nullptr, ic, ib.data());
+            std::array<VkImageMemoryBarrier,64> imageBarriers{};
+            uint32_t imageCount=0;
+            VkPipelineStageFlags srcStages=0;
+            VkPipelineStageFlags dstStages=0;
+
+            for (uint32_t i=0;i<count;++i) {
+                const CompiledBarrier& barrier=barriers_[pi][i];
+                srcStages |= barrier.srcStage;
+                dstStages |= barrier.dstStage;
+                if (barrier.isImage && imageCount<imageBarriers.size())
+                    imageBarriers[imageCount++]=barrier.image;
+            }
+
+            if (imageCount) {
+                if (!srcStages) srcStages=VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+                if (!dstStages) dstStages=VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+                vkCmdPipelineBarrier(
+                    cmd,srcStages,dstStages,0,
+                    0,nullptr,0,nullptr,imageCount,imageBarriers.data()
+                );
             }
         }
-        if (passes_[pi].execute) passes_[pi].execute(context, cmd, passes_[pi].userData);
+
+        if (passes_[pi].execute)
+            passes_[pi].execute(context,cmd,passes_[pi].userData);
+    }
+
+    for (uint32_t resourceIndex=0;
+         resourceIndex<resourceCount_;
+         ++resourceIndex) {
+        const RenderResourceDesc& desc=resources_[resourceIndex];
+        if (!desc.isImage || !desc.imported || !desc.exported ||
+            images_[resourceIndex]==VK_NULL_HANDLE)
+            continue;
+
+        VkImageMemoryBarrier presentBarrier{
+            VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER
+        };
+        presentBarrier.srcAccessMask=VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+        presentBarrier.dstAccessMask=VK_ACCESS_MEMORY_READ_BIT;
+        presentBarrier.oldLayout=VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        presentBarrier.newLayout=VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+        presentBarrier.srcQueueFamilyIndex=VK_QUEUE_FAMILY_IGNORED;
+        presentBarrier.dstQueueFamilyIndex=VK_QUEUE_FAMILY_IGNORED;
+        presentBarrier.image=images_[resourceIndex];
+        presentBarrier.subresourceRange={
+            VK_IMAGE_ASPECT_COLOR_BIT,
+            0,
+            std::max(1u,desc.image.mipLevels),
+            0,
+            std::max(1u,desc.image.arrayLayers)
+        };
+
+        vkCmdPipelineBarrier(
+            cmd,
+            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+            VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+            0,
+            0,nullptr,
+            0,nullptr,
+            1,
+            &presentBarrier
+        );
     }
 }
 const RenderResourceDesc* AetherisRenderGraph::GetResource(ResourceHandle h) const noexcept {

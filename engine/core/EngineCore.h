@@ -6,7 +6,11 @@
 #include <filesystem>
 #include <atomic>
 #include <thread>
+#include <chrono>
+#include <cstdint>
 namespace aetheris {
+
+enum class EngineState : uint8_t { Uninitialized, SurfaceReady, AllocatingAssets, Rendering };
 class EngineCore final {
  std::unique_ptr<IAetherisRenderer> activeRenderer_;
  RenderAPI activeApi_{RenderAPI::VULKAN};
@@ -19,12 +23,17 @@ class EngineCore final {
  DemoWorldInitializer demoWorld_{};
  bool demoWorldInitialized_{false};
  std::filesystem::path projectRoot_{};
+ EngineState state_{EngineState::Uninitialized};
+ bool firstSurfaceFramePresented_{};
+ bool assetBootFailed_{};
+ std::chrono::steady_clock::time_point assetBootStart_{};
  std::unique_ptr<IAetherisRenderer> MakeRenderer(RenderAPI);
  bool CreateRendererLocked(RenderAPI,ANativeWindow*);
  void RenderLoop() noexcept;
  void StartRenderLoopLocked();
  void StopRenderLoop() noexcept;
  void RenderOneFrameLocked();
+ void LogFatalBootFailureLocked(const char*,const char*) noexcept;
  EngineCore()=default;
 public:
  static EngineCore& Instance() noexcept;
@@ -35,6 +44,7 @@ public:
  void OnSurfaceChanged(ANativeWindow*);
  void OnSurfaceDestroyed() noexcept; void ApplyGizmo(const GizmoCommand&);
  void Shutdown() noexcept;
+ EngineState State() const noexcept;
  RenderAPI ActiveAPI() const noexcept; SceneSnapshot SnapshotScene() const;
 };
 }

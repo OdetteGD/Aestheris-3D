@@ -347,6 +347,7 @@ class VulkanRenderer final : public IAetherisRenderer {
 
     bool RecordShadowMaps(const RenderQueue& queue, std::span<const Transform> transforms) noexcept;
 
+    void DestroyDeferredResources() noexcept;
     void DestroyPipelines() noexcept;
     void DestroyDescriptors() noexcept;
     void DestroyDemoMeshes() noexcept;
