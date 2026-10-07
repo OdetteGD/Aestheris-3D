@@ -174,11 +174,13 @@ void AetherisRenderGraph::Execute(VkCommandBuffer cmd, RenderGraphContext& conte
             std::array<VkImageMemoryBarrier, 64> ib{};
             uint32_t ic = 0;
             for (uint32_t i = 0; i < count; ++i) if (barriers_[pi][i].isImage) ib[ic++] = barriers_[pi][i].image;
-            if (ic) VkPipelineStageFlags srcStages = 0, dstStages = 0;
-            for (uint32_t i = 0; i < count; ++i) { srcStages |= barriers_[pi][i].srcStage; dstStages |= barriers_[pi][i].dstStage; }
-            if (!srcStages) srcStages = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-            if (!dstStages) dstStages = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
-            vkCmdPipelineBarrier(cmd, srcStages, dstStages, 0, 0, nullptr, 0, nullptr, ic, ib.data());
+            if (ic) {
+                VkPipelineStageFlags srcStages = 0, dstStages = 0;
+                for (uint32_t i = 0; i < count; ++i) { srcStages |= barriers_[pi][i].srcStage; dstStages |= barriers_[pi][i].dstStage; }
+                if (!srcStages) srcStages = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+                if (!dstStages) dstStages = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+                vkCmdPipelineBarrier(cmd, srcStages, dstStages, 0, 0, nullptr, 0, nullptr, ic, ib.data());
+            }
         }
         if (passes_[pi].execute) passes_[pi].execute(context, cmd, passes_[pi].userData);
     }
