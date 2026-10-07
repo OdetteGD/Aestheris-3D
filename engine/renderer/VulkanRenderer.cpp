@@ -4914,7 +4914,6 @@ bool VulkanRenderer::CreateDefaultIBL() {
     }
 
     uint32_t specularMipLevels = 1;
-    uint32_t irradianceMipLevels = 1;
 
     if (!CreateKtx2Cube(
             root / "ibl_prefiltered.ktx2",
