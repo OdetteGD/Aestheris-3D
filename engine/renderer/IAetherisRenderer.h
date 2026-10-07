@@ -10,6 +10,7 @@ public:
  virtual bool BeginFrame()=0;
  virtual void EndFrame()=0;
  virtual bool RecreateSwapchain(ANativeWindow*)=0;
+ virtual void ReleaseSurface() noexcept=0;
  virtual void DrawRenderQueue(const RenderQueue&)=0;
  virtual void Shutdown() noexcept=0;
  virtual uint64_t CreateOffscreenRenderTarget(uint32_t,uint32_t)=0;
