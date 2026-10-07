@@ -8,6 +8,8 @@ public:
  IAetherisRenderer(const IAetherisRenderer&)=delete;
  IAetherisRenderer& operator=(const IAetherisRenderer&)=delete;
  virtual bool Initialize(ANativeWindow*)=0;
+ virtual bool EnsureDeferredResources()=0;
+ virtual bool IsReady() const noexcept=0;
  virtual bool BeginFrame()=0;
  virtual void EndFrame()=0;
  virtual bool RecreateSwapchain(ANativeWindow*)=0;
