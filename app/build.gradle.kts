@@ -16,7 +16,7 @@ android {
         externalNativeBuild {
             cmake {
                 cppFlags += listOf("-std=c++20")
-                arguments += listOf("-DANDROID_STL=c++_shared", "-DCMAKE_BUILD_TYPE=Release")
+                arguments += listOf(\n                    "-DANDROID_STL=c++_shared",\n                    "-DCMAKE_BUILD_TYPE=Release",\n                    "-DCMAKE_C_COMPILER_LAUNCHER=ccache",\n                    "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache"\n                )
             }
         }
     }
