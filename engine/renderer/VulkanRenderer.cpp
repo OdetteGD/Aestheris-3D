@@ -3621,29 +3621,504 @@ bool VulkanRenderer::CreateDefaultIBL() {
 bool VulkanRenderer::UpdateFrameUniforms() noexcept {
     std140::DeferredFrameBlock frame{};
 
+    constexpr float cameraX = 18.0f;
+    constexpr float cameraY = 14.0f;
+    constexpr float cameraZ = 18.0f;
+    constexpr float targetX = 0.0f;
+    constexpr float targetY = 1.2f;
+    constexpr float targetZ = 0.0f;
+
+    float fx = targetX - cameraX;
+    float fy = targetY - cameraY;
+    float fz = targetZ - cameraZ;
+
+    const float fLen =
+        std::sqrt(
+            fx*fx +
+            fy*fy +
+            fz*fz
+        );
+
+    fx /= std::max(fLen, 1e-5f);
+    fy /= std::max(fLen, 1e-5f);
+    fz /= std::max(fLen, 1e-5f);
+
+    float rx = fz;
+    float ry = 0.0f;
+    float rz = -fx;
+
+    const float rLen =
+        std::sqrt(
+            rx*rx +
+            ry*ry +
+            rz*rz
+        );
+
+    rx /= std::max(rLen,1e-5f);
+    ry /= std::max(rLen,1e-5f);
+    rz /= std::max(rLen,1e-5f);
+
+    const float ux = ry*fz - rz*fy;
+    const float uy = rz*fx - rx*fz;
+    const float uz = rx*fy - ry*fx;
+
+    const Vec4 sunDirection{
+        -0.35f,
+        -1.0f,
+        -0.25f,
+        0.0f
+    };
+
     frame.cameraPosition = {
-        18.0f, 14.0f, 18.0f, 1.0f
+        cameraX,
+        cameraY,
+        cameraZ,
+        1.0f
     };
 
-    frame.sunDirection = {
-        -0.35f, -1.0f, -0.25f, 0.0f
-    };
+    frame.sunDirection =
+        sunDirection;
 
+    // Physical HDR sun intensity; exposure/tone-map happen later.
     frame.sunColor = {
-        3.8f, 3.6f, 3.3f, 1.0f
+        4.8f,
+        4.55f,
+        4.15f,
+        1.0f
     };
 
-    frame.maxPrefilterMip = 0.0f;
+    // x = exposure, y = cloud coverage, z = cloud animation phase,
+    // w = Mie scattering strength.
+    frame.skyParams = {
+        1.20f,
+        0.56f,
+        7.0f,
+        1.15f
+    };
+
+    frame.cameraRight = {
+        rx,
+        ry,
+        rz,
+        static_cast<float>(extent_.width)
+    };
+
+    frame.cameraUp = {
+        ux,
+        uy,
+        uz,
+        static_cast<float>(extent_.height)
+    };
+
+    frame.cameraForward = {
+        fx,
+        fy,
+        fz,
+        0.0f
+    };
+
+    const Mat4 view =
+        MakeLookAt(
+            cameraX,
+            cameraY,
+            cameraZ,
+            targetX,
+            targetY,
+            targetZ
+        );
+
+    const float aspect =
+        extent_.height == 0
+            ? 1.0f
+            : static_cast<float>(
+                extent_.width
+            ) /
+            static_cast<float>(
+                extent_.height
+            );
+
+    const Mat4 projection =
+        MakePerspective(
+            55.0f *
+                3.14159265359f /
+                180.0f,
+            aspect,
+            0.1f,
+            150.0f
+        );
+
+    viewProj_ =
+        Multiply(
+            projection,
+            view
+        );
+
+    invViewProj_ =
+        Inverse(
+            viewProj_
+        );
+
+    frame.invViewProj =
+        invViewProj_;
+
+    constexpr float nearPlane = 0.1f;
+    constexpr float farPlane = 150.0f;
+    constexpr float lambda = 0.70f;
+    constexpr float tanHalfFov =
+        0.52f; // tan(55 degrees / 2)
+
+    const float cascadeNear[3] = {
+        nearPlane,
+        0.0f,
+        0.0f
+    };
+
+    (void)cascadeNear;
+
+    float previousSplit =
+        nearPlane;
+
+    const float sunX = sunDirection.x;
+    const float sunY = sunDirection.y;
+    const float sunZ = sunDirection.z;
+
+    for (uint32_t cascade=0;
+         cascade<3;
+         ++cascade) {
+
+        const float p =
+            static_cast<float>(
+                cascade + 1
+            ) / 3.0f;
+
+        const float logarithmic =
+            nearPlane *
+            std::pow(
+                farPlane / nearPlane,
+                p
+            );
+
+        const float uniform =
+            nearPlane +
+            (farPlane - nearPlane) *
+            p;
+
+        const float split =
+            logarithmic * lambda +
+            uniform * (1.0f - lambda);
+
+        csmSplits_[cascade] =
+            split;
+
+        const float centerDistance =
+            (previousSplit + split) * 0.5f;
+
+        const float nearDistance =
+            previousSplit;
+
+        const float farDistance =
+            split;
+
+        const float nearHeight =
+            tanHalfFov *
+            nearDistance;
+
+        const float nearWidth =
+            nearHeight *
+            aspect;
+
+        const float farHeight =
+            tanHalfFov *
+            farDistance;
+
+        const float farWidth =
+            farHeight *
+            aspect;
+
+        const float centers[2][3] = {
+            {
+                cameraX + fx * nearDistance,
+                cameraY + fy * nearDistance,
+                cameraZ + fz * nearDistance
+            },
+            {
+                cameraX + fx * farDistance,
+                cameraY + fy * farDistance,
+                cameraZ + fz * farDistance
+            }
+        };
+
+        std::array<Vec4,8> corners{};
+
+        uint32_t cornerIndex = 0;
+
+        for (uint32_t plane=0;
+             plane<2;
+             ++plane) {
+
+            const float hx =
+                plane == 0
+                    ? nearWidth
+                    : farWidth;
+
+            const float hy =
+                plane == 0
+                    ? nearHeight
+                    : farHeight;
+
+            for (int ySign : {-1,1}) {
+                for (int xSign : {-1,1}) {
+                    corners[cornerIndex++] = {
+                        centers[plane][0] +
+                            rx * hx *
+                                static_cast<float>(
+                                    xSign
+                                ) +
+                            ux * hy *
+                                static_cast<float>(
+                                    ySign
+                                ),
+
+                        centers[plane][1] +
+                            ry * hx *
+                                static_cast<float>(
+                                    xSign
+                                ) +
+                            uy * hy *
+                                static_cast<float>(
+                                    ySign
+                                ),
+
+                        centers[plane][2] +
+                            rz * hx *
+                                static_cast<float>(
+                                    xSign
+                                ) +
+                            uz * hy *
+                                static_cast<float>(
+                                    ySign
+                                ),
+
+                        1.0f
+                    };
+                }
+            }
+        }
+
+        float cx = 0.0f;
+        float cy = 0.0f;
+        float cz = 0.0f;
+
+        for (const Vec4& corner :
+             corners) {
+            cx += corner.x;
+            cy += corner.y;
+            cz += corner.z;
+        }
+
+        cx /= 8.0f;
+        cy /= 8.0f;
+        cz /= 8.0f;
+
+        const float lightDistance =
+            std::max(
+                40.0f,
+                farDistance * 0.75f
+            );
+
+        const Vec4 lightDirection{
+            sunX,
+            sunY,
+            sunZ,
+            0.0f
+        };
+
+        const Mat4 lightView =
+            MakeLookAtLight(
+                lightDirection,
+                cx,
+                cy,
+                cz
+            );
+
+        float minX =
+            std::numeric_limits<float>::max();
+
+        float minY =
+            std::numeric_limits<float>::max();
+
+        float minZ =
+            std::numeric_limits<float>::max();
+
+        float maxX =
+            -std::numeric_limits<float>::max();
+
+        float maxY =
+            -std::numeric_limits<float>::max();
+
+        float maxZ =
+            -std::numeric_limits<float>::max();
+
+        for (const Vec4& corner :
+             corners) {
+
+            const float x =
+                lightView.m[0] * corner.x +
+                lightView.m[4] * corner.y +
+                lightView.m[8] * corner.z +
+                lightView.m[12];
+
+            const float y =
+                lightView.m[1] * corner.x +
+                lightView.m[5] * corner.y +
+                lightView.m[9] * corner.z +
+                lightView.m[13];
+
+            const float z =
+                lightView.m[2] * corner.x +
+                lightView.m[6] * corner.y +
+                lightView.m[10] * corner.z +
+                lightView.m[14];
+
+            minX = std::min(minX,x);
+            minY = std::min(minY,y);
+            minZ = std::min(minZ,z);
+            maxX = std::max(maxX,x);
+            maxY = std::max(maxY,y);
+            maxZ = std::max(maxZ,z);
+        }
+
+        (void)centerDistance;
+        (void)lightDistance;
+
+        const float pad =
+            8.0f +
+            split * 0.025f;
+
+        minX -= pad;
+        maxX += pad;
+        minY -= pad;
+        maxY += pad;
+
+        const float width =
+            maxX - minX;
+
+        const float height =
+            maxY - minY;
+
+        const float texelX =
+            width /
+            static_cast<float>(
+                csmExtent_.width
+            );
+
+        const float texelY =
+            height /
+            static_cast<float>(
+                csmExtent_.height
+            );
+
+        const float centerX =
+            (minX + maxX) * 0.5f;
+
+        const float centerY =
+            (minY + maxY) * 0.5f;
+
+        const float stableCenterX =
+            std::floor(
+                centerX /
+                std::max(
+                    texelX,
+                    1e-4f
+                )
+            ) *
+            std::max(
+                texelX,
+                1e-4f
+            );
+
+        const float stableCenterY =
+            std::floor(
+                centerY /
+                std::max(
+                    texelY,
+                    1e-4f
+                )
+            ) *
+            std::max(
+                texelY,
+                1e-4f
+            );
+
+        minX =
+            stableCenterX -
+            width * 0.5f;
+
+        maxX =
+            stableCenterX +
+            width * 0.5f;
+
+        minY =
+            stableCenterY -
+            height * 0.5f;
+
+        maxY =
+            stableCenterY +
+            height * 0.5f;
+
+        const float orthoNear =
+            std::max(
+                0.1f,
+                -maxZ - 30.0f
+            );
+
+        const float orthoFar =
+            std::max(
+                orthoNear + 1.0f,
+                -minZ + 30.0f
+            );
+
+        csmMatrices_[cascade] =
+            Multiply(
+                MakeOrthographic(
+                    minX,
+                    maxX,
+                    minY,
+                    maxY,
+                    orthoNear,
+                    orthoFar
+                ),
+                lightView
+            );
+
+        previousSplit =
+            split;
+    }
+
+    for (uint32_t i=0;i<3;++i)
+        frame.csmMatrices[i] =
+            csmMatrices_[i];
+
+    frame.csmSplits = {
+        csmSplits_[0],
+        csmSplits_[1],
+        csmSplits_[2],
+        0.0f
+    };
 
     const VkDeviceSize offset =
-        frame_ * frameUboStride_;
+        static_cast<VkDeviceSize>(
+            frame_
+        ) *
+        frameUboStride_;
 
     void* mapped = nullptr;
 
     if (vkMapMemory(
             device_,
             frameUbo_.allocation.memory,
-            frameUbo_.allocation.offset + offset,
+            frameUbo_.allocation.offset +
+                offset,
             sizeof(frame),
             0,
             &mapped
@@ -3855,6 +4330,165 @@ Mat4 VulkanRenderer::MakePerspective(
     result.m[14] =
         (farPlane * nearPlane) /
         (nearPlane - farPlane);
+
+    return result;
+}
+
+Mat4 VulkanRenderer::Inverse(const Mat4& input) noexcept {
+    float a[4][8]{};
+
+    for (uint32_t r=0;r<4;++r) {
+        for (uint32_t c=0;c<4;++c)
+            a[r][c] =
+                input.m[c*4+r];
+
+        a[r][4+r] = 1.0f;
+    }
+
+    for (uint32_t col=0;col<4;++col) {
+        uint32_t pivot = col;
+        float best =
+            std::abs(a[pivot][col]);
+
+        for (uint32_t row=col+1;row<4;++row) {
+            const float value =
+                std::abs(a[row][col]);
+
+            if (value > best) {
+                best = value;
+                pivot = row;
+            }
+        }
+
+        if (best < 1e-8f)
+            return Identity();
+
+        if (pivot != col) {
+            for (uint32_t c=0;c<8;++c)
+                std::swap(
+                    a[pivot][c],
+                    a[col][c]
+                );
+        }
+
+        const float invPivot =
+            1.0f /
+            a[col][col];
+
+        for (uint32_t c=0;c<8;++c)
+            a[col][c] *= invPivot;
+
+        for (uint32_t row=0;row<4;++row) {
+            if (row == col)
+                continue;
+
+            const float factor =
+                a[row][col];
+
+            for (uint32_t c=0;c<8;++c)
+                a[row][c] -=
+                    factor *
+                    a[col][c];
+        }
+    }
+
+    Mat4 result{};
+
+    for (uint32_t r=0;r<4;++r)
+        for (uint32_t c=0;c<4;++c)
+            result.m[c*4+r] =
+                a[r][4+c];
+
+    return result;
+}
+
+Mat4 VulkanRenderer::MakeLookAtLight(
+    const Vec4& direction,
+    float cx,
+    float cy,
+    float cz) noexcept
+{
+    const float dx =
+        direction.x;
+    const float dy =
+        direction.y;
+    const float dz =
+        direction.z;
+
+    const float distance = 90.0f;
+
+    const float ex =
+        cx -
+        dx *
+        distance;
+
+    const float ey =
+        cy -
+        dy *
+        distance;
+
+    const float ez =
+        cz -
+        dz *
+        distance;
+
+    return MakeLookAt(
+        ex,ey,ez,
+        cx,cy,cz
+    );
+}
+
+Mat4 VulkanRenderer::MakeOrthographic(
+    float l,
+    float r,
+    float b,
+    float t,
+    float n,
+    float f) noexcept
+{
+    Mat4 result = Identity();
+
+    result.m[0] =
+        2.0f /
+        std::max(
+            r-l,
+            1e-5f
+        );
+
+    result.m[5] =
+        2.0f /
+        std::max(
+            t-b,
+            1e-5f
+        );
+
+    result.m[10] =
+        1.0f /
+        std::max(
+            f-n,
+            1e-5f
+        );
+
+    result.m[12] =
+        -(r+l) /
+        std::max(
+            r-l,
+            1e-5f
+        );
+
+    result.m[13] =
+        -(t+b) /
+        std::max(
+            t-b,
+            1e-5f
+        );
+
+    result.m[14] =
+        -n /
+        std::max(
+            f-n,
+            1e-5f
+        );
 
     return result;
 }
