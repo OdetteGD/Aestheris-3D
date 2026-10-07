@@ -19,7 +19,7 @@ layout(set=0,binding=2,std140) uniform Frame {
     vec4 CsmSplits;
 } F;
 
-const vec3 Kernel[16] = vec3[16](
+const vec3 Kernel[8] = vec3[8](
     vec3( 0.122, 0.045, 0.113),
     vec3(-0.179, 0.091, 0.074),
     vec3( 0.248,-0.112, 0.033),
@@ -27,18 +27,10 @@ const vec3 Kernel[16] = vec3[16](
     vec3( 0.086, 0.162, 0.231),
     vec3(-0.102, 0.214, 0.171),
     vec3( 0.334, 0.058, 0.093),
-    vec3(-0.286, 0.176, 0.241),
-    vec3( 0.192,-0.254, 0.102),
-    vec3(-0.094,-0.198, 0.312),
-    vec3( 0.382,-0.081, 0.187),
-    vec3(-0.421,0.102,0.155),
-    vec3( 0.166,0.281,0.107),
-    vec3(-0.205,0.337,0.084),
-    vec3( 0.284,0.224,0.192),
-    vec3(-0.351,0.254,0.062)
+    vec3(-0.286, 0.176, 0.241)
 );
 
-float hash12(vec2 p)
+float Hash12(vec2 p)
 {
     vec3 p3 =
         fract(
@@ -54,19 +46,27 @@ float hash12(vec2 p)
 
     return
         fract(
-            (p3.x+p3.y) *
+            (p3.x + p3.y) *
             p3.z
         );
 }
 
-vec3 ReconstructViewPosition(
+vec3 ReconstructWorld(
     vec2 uv,
-    float depth)
-{
+    float depth
+) {
     vec4 clip =
         vec4(
-            uv * 2.0 - 1.0,
-            depth,
+            clamp(
+                uv,
+                vec2(0.0),
+                vec2(1.0)
+            ) * 2.0 - 1.0,
+            clamp(
+                depth,
+                0.0,
+                1.0
+            ),
             1.0
         );
 
@@ -80,64 +80,56 @@ vec3 ReconstructViewPosition(
             1e-6
         );
 
-    return
-        world.xyz -
-        F.CameraPosition.xyz;
+    return world.xyz;
 }
 
 void main()
 {
-    float depth =
+    const vec2 safeUV =
+        clamp(
+            UV,
+            vec2(0.0),
+            vec2(1.0)
+        );
+
+    const float depth =
         texture(
             DepthMap,
-            UV
+            safeUV
         ).r;
 
-    if(depth >= 0.99999) {
+    if (depth >= 0.99999) {
         OutAO = 1.0;
         return;
     }
 
-    vec3 viewPosition =
-        ReconstructViewPosition(
-            UV,
+    const vec3 position =
+        ReconstructWorld(
+            safeUV,
             depth
         );
 
-    vec3 normal =
+    const vec3 normal =
         normalize(
             texture(
                 NormalMap,
-                UV
+                safeUV
             ).xyz *
-            2.0 - 1.0
+            2.0 -
+            1.0
         );
 
-    vec2 noiseUv =
-        UV *
-        vec2(
-            max(F.CameraRight.w,1.0),
-            max(F.CameraUp.w,1.0)
-        ) *
-        0.03125;
-
-    vec3 randomVector =
+    const vec3 randomVector =
         normalize(
             vec3(
-                hash12(noiseUv),
-                hash12(
-                    noiseUv +
-                    17.23
-                ),
-                hash12(
-                    noiseUv +
-                    41.71
-                )
-            ) *
-            2.0 - 1.0
+                Hash12(safeUV),
+                Hash12(safeUV + 17.23),
+                Hash12(safeUV + 41.71)
+            ) * 2.0 -
+            1.0
         );
 
-    vec3 tangent =
+    const vec3 tangent =
         normalize(
             randomVector -
             normal *
@@ -147,7 +139,7 @@ void main()
             )
         );
 
-    vec3 bitangent =
+    const vec3 bitangent =
         normalize(
             cross(
                 normal,
@@ -155,136 +147,122 @@ void main()
             )
         );
 
-    mat3 TBN =
+    const mat3 TBN =
         mat3(
             tangent,
             bitangent,
             normal
         );
 
-    float radius =
-        1.35;
+    const float radius =
+        1.10;
 
-    float bias =
+    const float bias =
         0.025;
 
     float occlusion = 0.0;
 
-    for(int i=0;i<16;++i) {
-
-        float scale =
-            float(i+1) / 16.0;
-
-        scale =
+    for (int i=0; i<8; ++i) {
+        const float scale =
             0.15 +
-            scale *
-            scale *
+            pow(
+                float(i + 1) / 8.0,
+                2.0
+            ) *
             0.85;
 
-        vec3 sampleVector =
+        const vec3 samplePosition =
+            position +
             TBN *
-            Kernel[i];
-
-        vec3 samplePosition =
-            viewPosition +
-            sampleVector *
+            Kernel[i] *
             radius *
             scale;
 
-        vec4 projected =
+        const vec4 projected =
             F.InvViewProj *
             vec4(
-                samplePosition +
-                F.CameraPosition.xyz,
+                samplePosition,
                 1.0
             );
 
-        if(projected.w <= 1e-6)
+        if (projected.w <= 1e-6)
             continue;
 
-        vec2 sampleUv =
+        vec2 sampleUV =
             projected.xy /
             projected.w;
 
-        sampleUv =
-            sampleUv *
-            0.5 +
-            0.5;
-
-        if(
-            sampleUv.x < 0.0 ||
-            sampleUv.x > 1.0 ||
-            sampleUv.y < 0.0 ||
-            sampleUv.y > 1.0
-        )
+        if (
+            sampleUV.x < 0.0 ||
+            sampleUV.x > 1.0 ||
+            sampleUV.y < 0.0 ||
+            sampleUV.y > 1.0
+        ) {
             continue;
+        }
 
-        float sampleDepth =
-            texture(
-                DepthMap,
-                sampleUv
-            ).r;
-
-        vec3 realSample =
-            ReconstructViewPosition(
-                sampleUv,
-                sampleDepth
+        sampleUV =
+            clamp(
+                sampleUV,
+                vec2(0.0),
+                vec2(1.0)
             );
 
-        float range =
+        const float sampledDepth =
+            texture(
+                DepthMap,
+                sampleUV
+            ).r;
+
+        if (sampledDepth >= 0.99999)
+            continue;
+
+        const vec3 sampledPosition =
+            ReconstructWorld(
+                sampleUV,
+                sampledDepth
+            );
+
+        const float rangeWeight =
+            1.0 -
             smoothstep(
                 0.0,
-                1.0,
-                radius /
-                max(
-                    abs(
-                        viewPosition.z -
-                        realSample.z
-                    ),
-                    1e-4
+                radius,
+                distance(
+                    sampledPosition,
+                    position
                 )
             );
 
-        float blocked =
-            realSample.z >
-            samplePosition.z + bias
+        const float blocked =
+            dot(
+                sampledPosition -
+                samplePosition,
+                normal
+            ) > bias
                 ? 1.0
                 : 0.0;
 
         occlusion +=
             blocked *
-            range;
+            max(
+                rangeWeight,
+                0.0
+            );
     }
 
-    occlusion =
+    const float ao =
         1.0 -
-        occlusion /
-        16.0;
-
-    // Preserve some grazing-angle ambient to avoid over-darkening mobile scenes.
-    float horizon =
-        clamp(
-            0.35 +
-            0.65 *
-            dot(
-                normal,
-                normalize(
-                    F.CameraForward.xyz
-                ) * -1.0
-            ),
-            0.25,
-            1.0
-        );
+        occlusion / 8.0;
 
     OutAO =
         clamp(
             mix(
                 1.0,
-                occlusion,
-                0.82
-            ) *
-            horizon,
-            0.12,
+                ao,
+                0.80
+            ),
+            0.20,
             1.0
         );
 }
