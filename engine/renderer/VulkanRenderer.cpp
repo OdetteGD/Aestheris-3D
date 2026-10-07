@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstring>
 #include <vector>
+#include <filesystem>
 namespace aetheris {
 namespace {
 #if defined(NDEBUG)
@@ -12,7 +13,7 @@ constexpr bool kValidation=true;
 #endif
 constexpr const char* kValidationLayer="VK_LAYER_KHRONOS_validation";
 }
-bool VulkanRenderer::Initialize(ANativeWindow*w){if(initialized_||!w)return false;window_=w;ANativeWindow_acquire(window_);if(!CreateInstance()||!CreateSurface()||!PickGPU()||!CreateDevice()||!CreateSwapchain()||!CreatePass()||!CreateViews()||!CreateFramebuffers()||!CreateFrames()){Shutdown();return false;}initialized_=true;return true;}
+bool VulkanRenderer::Initialize(ANativeWindow*w){if(initialized_||!w)return false;window_=w;ANativeWindow_acquire(window_);if(!CreateInstance()||!CreateSurface()||!PickGPU()||!CreateDevice()||!resources_.Initialize(gpu_, device_, projectRoot_.empty() ? std::filesystem::path("cache/pipelines/aetheris_vk.bin") : projectRoot_ / "cache/pipelines/aetheris_vk.bin")||!CreateSwapchain()||!CreatePass()||!CreateViews()||!CreateFramebuffers()||!CreateFrames()){Shutdown();return false;}initialized_=true;return true;}
 bool VulkanRenderer::CreateInstance(){
  uint32_t n=0;vkEnumerateInstanceExtensionProperties(nullptr,&n,nullptr);std::vector<VkExtensionProperties> e(n);vkEnumerateInstanceExtensionProperties(nullptr,&n,e.data());
  std::vector<const char*> x={VK_KHR_SURFACE_EXTENSION_NAME,VK_KHR_ANDROID_SURFACE_EXTENSION_NAME};if(kValidation)x.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
