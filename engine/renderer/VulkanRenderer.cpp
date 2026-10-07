@@ -5155,10 +5155,62 @@ bool VulkanRenderer::CreateDefaultIBL() {
                     prefilteredMemory_,
                     prefilteredView_
                 )) {
-                return false;
-            }
+                const std::array<uint8_t,4> neutral = {
+                    48, 56, 74, 255
+                };
 
-            specularMipLevels = 1;
+                if (!CreateImageRaw(
+                        VK_FORMAT_R8G8B8A8_UNORM,
+                        VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                            VK_IMAGE_USAGE_SAMPLED_BIT,
+                        VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT,
+                        {1,1,1},
+                        6,
+                        prefilteredImage_,
+                        prefilteredMemory_
+                    ) ||
+                    !CreateImageViewRaw(
+                        prefilteredImage_,
+                        VK_FORMAT_R8G8B8A8_UNORM,
+                        VK_IMAGE_VIEW_TYPE_CUBE,
+                        VK_IMAGE_ASPECT_COLOR_BIT,
+                        6,
+                        prefilteredView_
+                    )) {
+                    return false;
+                }
+
+                std::array<VkBufferImageCopy,6> copies{};
+
+                for (uint32_t face=0; face<6; ++face) {
+                    copies[face].imageSubresource = {
+                        VK_IMAGE_ASPECT_COLOR_BIT,
+                        0,
+                        face,
+                        1
+                    };
+
+                    copies[face].imageExtent = {
+                        1,1,1
+                    };
+                }
+
+                if (!UploadImage(
+                        prefilteredImage_,
+                        neutral.data(),
+                        neutral.size(),
+                        copies.data(),
+                        6
+                    )) {
+                    return false;
+                }
+
+                specularMipLevels = 1;
+
+                AETHERIS_VK_LOGW(
+                    "Offline prefiltered environment unavailable; using minimal safety cubemap"
+                );
+            }
         }
     }
 
