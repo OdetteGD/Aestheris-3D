@@ -3670,6 +3670,589 @@ bool VulkanRenderer::CreateFrameUniformBuffer() {
     return frameUbo_.buffer != VK_NULL_HANDLE;
 }
 
+bool VulkanRenderer::CreateKtx2Cube(
+    const std::filesystem::path& path,
+    VkImage& image,
+    VkDeviceMemory& memory,
+    VkImageView& view,
+    uint32_t& mipLevels
+) {
+    OfflineEnvironmentData data{};
+
+    if (!OfflineEnvironmentLoader::Load(
+            path,
+            data
+        ) ||
+        data.kind !=
+            OfflineEnvironmentData::Kind::CubeKTX2 ||
+        data.faces != 6 ||
+        data.mipLevels == 0 ||
+        data.mipLevels > 16) {
+        return false;
+    }
+
+    const VkFormat format =
+        static_cast<VkFormat>(
+            data.vkFormat
+        );
+
+    if (!CreateImageRawMip(
+            format,
+            VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                VK_IMAGE_USAGE_SAMPLED_BIT,
+            VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT,
+            {
+                data.width,
+                data.height,
+                1
+            },
+            data.mipLevels,
+            6,
+            image,
+            memory
+        )) {
+        return false;
+    }
+
+    if (!CreateImageViewRawMip(
+            image,
+            format,
+            VK_IMAGE_VIEW_TYPE_CUBE,
+            VK_IMAGE_ASPECT_COLOR_BIT,
+            data.mipLevels,
+            6,
+            view
+        )) {
+        vkDestroyImage(
+            device_,
+            image,
+            nullptr
+        );
+        vkFreeMemory(
+            device_,
+            memory,
+            nullptr
+        );
+        image = VK_NULL_HANDLE;
+        memory = VK_NULL_HANDLE;
+        return false;
+    }
+
+    std::array<
+        VkBufferImageCopy,
+        16 * 6
+    > copies{};
+
+    uint32_t copyCount = 0;
+
+    for (uint32_t level=0;
+         level<data.mipLevels;
+         ++level) {
+
+        const OfflineImageLevel& l =
+            data.levels[level];
+
+        const uint64_t faceBytes =
+            l.byteLength /
+            6u;
+
+        for (uint32_t face=0;
+             face<6;
+             ++face) {
+
+            VkBufferImageCopy& copy =
+                copies[copyCount++];
+
+            copy.bufferOffset =
+                l.offset +
+                static_cast<uint64_t>(
+                    face
+                ) *
+                faceBytes;
+
+            copy.imageSubresource = {
+                VK_IMAGE_ASPECT_COLOR_BIT,
+                level,
+                face,
+                1
+            };
+
+            copy.imageExtent = {
+                l.width,
+                l.height,
+                1
+            };
+        }
+    }
+
+    if (!UploadImage(
+            image,
+            data.bytes.data(),
+            data.bytes.size(),
+            copies.data(),
+            copyCount
+        )) {
+        vkDestroyImageView(
+            device_,
+            view,
+            nullptr
+        );
+        vkDestroyImage(
+            device_,
+            image,
+            nullptr
+        );
+        vkFreeMemory(
+            device_,
+            memory,
+            nullptr
+        );
+
+        view = VK_NULL_HANDLE;
+        image = VK_NULL_HANDLE;
+        memory = VK_NULL_HANDLE;
+
+        return false;
+    }
+
+    mipLevels = data.mipLevels;
+    return true;
+}
+
+bool VulkanRenderer::CreateHdrEnvironmentCube(
+    const std::filesystem::path& path,
+    VkImage& image,
+    VkDeviceMemory& memory,
+    VkImageView& view
+) {
+    OfflineEnvironmentData data{};
+
+    if (!OfflineEnvironmentLoader::Load(
+            path,
+            data
+        ) ||
+        data.kind !=
+            OfflineEnvironmentData::Kind::
+                EquirectangularHDR) {
+        return false;
+    }
+
+    constexpr uint32_t cubeSize = 128;
+    constexpr uint32_t facePixels =
+        cubeSize * cubeSize;
+
+    std::vector<float> cube(
+        static_cast<size_t>(
+            facePixels
+        ) * 6u * 4u
+    );
+
+    const float sourceWidth =
+        static_cast<float>(
+            data.width
+        );
+
+    const float sourceHeight =
+        static_cast<float>(
+            data.height
+        );
+
+    auto sample = [&](
+        float x,
+        float y,
+        float& r,
+        float& g,
+        float& b
+    ) noexcept {
+
+        x = x -
+            std::floor(x /
+                       sourceWidth) *
+            sourceWidth;
+
+        y =
+            std::clamp(
+                y,
+                0.0f,
+                sourceHeight - 1.0f
+            );
+
+        const uint32_t x0 =
+            static_cast<uint32_t>(
+                x
+            );
+
+        const uint32_t y0 =
+            static_cast<uint32_t>(
+                y
+            );
+
+        const uint32_t x1 =
+            (x0 + 1u) %
+            data.width;
+
+        const uint32_t y1 =
+            std::min(
+                y0 + 1u,
+                data.height - 1u
+            );
+
+        const float fx =
+            x -
+            static_cast<float>(
+                x0
+            );
+
+        const float fy =
+            y -
+            static_cast<float>(
+                y0
+            );
+
+        auto pixel = [&](
+            uint32_t px,
+            uint32_t py,
+            uint32_t channel
+        ) noexcept {
+            const size_t index =
+                (
+                    (
+                        static_cast<size_t>(
+                            py
+                        ) *
+                        data.width
+                    ) +
+                    px
+                ) * 4u +
+                channel;
+
+            return
+                reinterpret_cast<const float*>(
+                    data.bytes.data()
+                )[index];
+        };
+
+        const float r00 =
+            pixel(x0,y0,0);
+        const float r10 =
+            pixel(x1,y0,0);
+        const float r01 =
+            pixel(x0,y1,0);
+        const float r11 =
+            pixel(x1,y1,0);
+
+        const float g00 =
+            pixel(x0,y0,1);
+        const float g10 =
+            pixel(x1,y0,1);
+        const float g01 =
+            pixel(x0,y1,1);
+        const float g11 =
+            pixel(x1,y1,1);
+
+        const float b00 =
+            pixel(x0,y0,2);
+        const float b10 =
+            pixel(x1,y0,2);
+        const float b01 =
+            pixel(x0,y1,2);
+        const float b11 =
+            pixel(x1,y1,2);
+
+        r = std::lerp(
+            std::lerp(r00,r10,fx),
+            std::lerp(r01,r11,fx),
+            fy
+        );
+
+        g = std::lerp(
+            std::lerp(g00,g10,fx),
+            std::lerp(g01,g11,fx),
+            fy
+        );
+
+        b = std::lerp(
+            std::lerp(b00,b10,fx),
+            std::lerp(b01,b11,fx),
+            fy
+        );
+    };
+
+    for (uint32_t face=0;
+         face<6;
+         ++face) {
+
+        for (uint32_t y=0;
+             y<cubeSize;
+             ++y) {
+
+            for (uint32_t x=0;
+                 x<cubeSize;
+                 ++x) {
+
+                const float u =
+                    (
+                        static_cast<float>(x) +
+                        0.5f
+                    ) /
+                    static_cast<float>(
+                        cubeSize
+                    ) *
+                    2.0f -
+                    1.0f;
+
+                const float v =
+                    (
+                        static_cast<float>(y) +
+                        0.5f
+                    ) /
+                    static_cast<float>(
+                        cubeSize
+                    ) *
+                    2.0f -
+                    1.0f;
+
+                float dx=0.0f;
+                float dy=0.0f;
+                float dz=0.0f;
+
+                switch(face) {
+                    case 0:
+                        dx=1.0f; dy=-v; dz=-u;
+                        break;
+                    case 1:
+                        dx=-1.0f; dy=-v; dz=u;
+                        break;
+                    case 2:
+                        dx=u; dy=1.0f; dz=v;
+                        break;
+                    case 3:
+                        dx=u; dy=-1.0f; dz=-v;
+                        break;
+                    case 4:
+                        dx=u; dy=-v; dz=1.0f;
+                        break;
+                    default:
+                        dx=-u; dy=-v; dz=-1.0f;
+                        break;
+                }
+
+                const float length =
+                    std::sqrt(
+                        dx*dx +
+                        dy*dy +
+                        dz*dz
+                    );
+
+                dx /= std::max(
+                    length,
+                    1e-6f
+                );
+                dy /= std::max(
+                    length,
+                    1e-6f
+                );
+                dz /= std::max(
+                    length,
+                    1e-6f
+                );
+
+                const float theta =
+                    std::atan2(
+                        dz,
+                        dx
+                    );
+
+                const float phi =
+                    std::asin(
+                        std::clamp(
+                            dy,
+                            -1.0f,
+                            1.0f
+                        )
+                    );
+
+                const float su =
+                    (
+                        theta /
+                        (2.0f * 3.14159265359f) +
+                        0.5f
+                    ) *
+                    sourceWidth;
+
+                const float sv =
+                    (
+                        0.5f -
+                        phi /
+                        3.14159265359f
+                    ) *
+                    sourceHeight;
+
+                float r=0.0f;
+                float g=0.0f;
+                float b=0.0f;
+
+                sample(
+                    su,
+                    sv,
+                    r,
+                    g,
+                    b
+                );
+
+                const size_t dst =
+                    (
+                        (
+                            static_cast<size_t>(
+                                face
+                            ) *
+                            facePixels
+                        ) +
+                        (
+                            static_cast<size_t>(
+                                y
+                            ) *
+                            cubeSize +
+                            x
+                        )
+                    ) * 4u;
+
+                cube[dst+0] = r;
+                cube[dst+1] = g;
+                cube[dst+2] = b;
+                cube[dst+3] = 1.0f;
+            }
+        }
+    }
+
+    if (!CreateImageRaw(
+            VK_FORMAT_R32G32B32A32_SFLOAT,
+            VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                VK_IMAGE_USAGE_SAMPLED_BIT,
+            VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT,
+            {cubeSize,cubeSize,1},
+            6,
+            image,
+            memory
+        ) ||
+        !CreateImageViewRaw(
+            image,
+            VK_FORMAT_R32G32B32A32_SFLOAT,
+            VK_IMAGE_VIEW_TYPE_CUBE,
+            VK_IMAGE_ASPECT_COLOR_BIT,
+            6,
+            view
+        )) {
+        return false;
+    }
+
+    std::array<
+        VkBufferImageCopy,
+        6
+    > copies{};
+
+    const VkDeviceSize faceBytes =
+        static_cast<VkDeviceSize>(
+            facePixels * 4u * sizeof(float)
+        );
+
+    for(uint32_t face=0;
+        face<6;
+        ++face) {
+
+        copies[face].bufferOffset =
+            static_cast<VkDeviceSize>(
+                face
+            ) *
+            faceBytes;
+
+        copies[face].imageSubresource = {
+            VK_IMAGE_ASPECT_COLOR_BIT,
+            0,
+            face,
+            1
+        };
+
+        copies[face].imageExtent = {
+            cubeSize,
+            cubeSize,
+            1
+        };
+    }
+
+    return UploadImage(
+        image,
+        cube.data(),
+        cube.size()*sizeof(float),
+        copies.data(),
+        6
+    );
+}
+
+bool VulkanRenderer::LoadOfflineEnvironment() {
+    const std::filesystem::path root =
+        projectRoot_.empty()
+            ? std::filesystem::path(
+                "assets/textures"
+            )
+            : projectRoot_ /
+                "assets/textures";
+
+    const std::filesystem::path ktx =
+        root /
+        "environment.ktx2";
+
+    const std::filesystem::path hdr =
+        root /
+        "environment.hdr";
+
+    uint32_t mipLevels = 1;
+
+    if (std::filesystem::exists(ktx) &&
+        CreateKtx2Cube(
+            ktx,
+            environmentImage_,
+            environmentMemory_,
+            environmentView_,
+            mipLevels
+        )) {
+        environmentMipLevels_ =
+            mipLevels;
+
+        AETHERIS_VK_LOGI(
+            "Loaded offline environment KTX2: %u x %u mips=%u",
+            0u,
+            0u,
+            mipLevels
+        );
+
+        return true;
+    }
+
+    if (std::filesystem::exists(hdr) &&
+        CreateHdrEnvironmentCube(
+            hdr,
+            environmentImage_,
+            environmentMemory_,
+            environmentView_
+        )) {
+        environmentMipLevels_ = 1;
+
+        AETHERIS_VK_LOGI(
+            "Loaded offline Radiance HDR environment"
+        );
+
+        return true;
+    }
+
+    AETHERIS_VK_LOGW(
+        "No offline environment found under %s",
+        root.string().c_str()
+    );
+
+    return false;
+}
+
 bool VulkanRenderer::CreateDefaultIBL() {
     VkSamplerCreateInfo sampler{
         VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO
@@ -3690,7 +4273,7 @@ bool VulkanRenderer::CreateDefaultIBL() {
         VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
 
     sampler.minLod = 0.0f;
-    sampler.maxLod = 0.0f;
+    sampler.maxLod = 16.0f;
 
     if (vkCreateSampler(
             device_,
@@ -3701,283 +4284,94 @@ bool VulkanRenderer::CreateDefaultIBL() {
         return false;
     }
 
-    constexpr uint32_t resolution = 16;
-    constexpr uint32_t faceBytes =
-        resolution *
-        resolution *
-        4;
+    const std::filesystem::path root =
+        projectRoot_.empty()
+            ? std::filesystem::path(
+                "assets/textures"
+            )
+            : projectRoot_ /
+                "assets/textures";
 
-    std::array<uint8_t, faceBytes * 6>
-        environment{};
+    if (!CreateKtx2Cube(
+            root / "ibl_irradiance.ktx2",
+            irradianceImage_,
+            irradianceMemory_,
+            irradianceView_,
+            mipLevels
+        )) {
+        // Boot fallback only when the developer has not supplied offline IBL.
+        const std::array<uint8_t,4> neutral = {
+            64,72,96,255
+        };
 
-    const Vec4 sun{
-        -0.35f,
-        -1.0f,
-        -0.25f,
-        0.0f
-    };
+        if (!CreateImageRaw(
+                VK_FORMAT_R8G8B8A8_UNORM,
+                VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                    VK_IMAGE_USAGE_SAMPLED_BIT,
+                VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT,
+                {1,1,1},
+                6,
+                irradianceImage_,
+                irradianceMemory_
+            ) ||
+            !CreateImageViewRaw(
+                irradianceImage_,
+                VK_FORMAT_R8G8B8A8_UNORM,
+                VK_IMAGE_VIEW_TYPE_CUBE,
+                VK_IMAGE_ASPECT_COLOR_BIT,
+                6,
+                irradianceView_
+            )) {
+            return false;
+        }
 
-    for (uint32_t face=0; face<6; ++face) {
-        for (uint32_t y=0; y<resolution; ++y) {
-            for (uint32_t x=0; x<resolution; ++x) {
-                const float u =
-                    (
-                        static_cast<float>(x) +
-                        0.5f
-                    ) /
-                    static_cast<float>(resolution) *
-                    2.0f -
-                    1.0f;
+        std::array<VkBufferImageCopy,6> copies{};
+        for(uint32_t face=0;face<6;++face) {
+            copies[face].imageSubresource = {
+                VK_IMAGE_ASPECT_COLOR_BIT,0,face,1
+            };
+            copies[face].imageExtent = {1,1,1};
+        }
 
-                const float v =
-                    (
-                        static_cast<float>(y) +
-                        0.5f
-                    ) /
-                    static_cast<float>(resolution) *
-                    2.0f -
-                    1.0f;
-
-                float dx=0.0f;
-                float dy=0.0f;
-                float dz=0.0f;
-
-                switch (face) {
-                    case 0: dx= 1.0f; dy=-v; dz=-u; break;
-                    case 1: dx=-1.0f; dy=-v; dz= u; break;
-                    case 2: dx= u;    dy= 1.0f; dz= v; break;
-                    case 3: dx= u;    dy=-1.0f; dz=-v; break;
-                    case 4: dx= u;    dy=-v; dz= 1.0f; break;
-                    default:dx=-u;    dy=-v; dz=-1.0f; break;
-                }
-
-                const float len =
-                    std::sqrt(
-                        dx*dx +
-                        dy*dy +
-                        dz*dz
-                    );
-
-                dx /= std::max(len,1e-5f);
-                dy /= std::max(len,1e-5f);
-                dz /= std::max(len,1e-5f);
-
-                const float horizon =
-                    1.0f -
-                    std::clamp(
-                        dy,
-                        -1.0f,
-                        1.0f
-                    );
-
-                const float sunDot =
-                    std::max(
-                        dx*sun.x +
-                        dy*sun.y +
-                        dz*sun.z,
-                        0.0f
-                    );
-
-                const float sunGlow =
-                    std::pow(
-                        sunDot,
-                        64.0f
-                    );
-
-                const float r =
-                    0.035f +
-                    0.20f*horizon +
-                    5.0f*sunGlow;
-
-                const float g =
-                    0.085f +
-                    0.24f*horizon +
-                    4.5f*sunGlow;
-
-                const float b =
-                    0.22f +
-                    0.40f*horizon +
-                    3.5f*sunGlow;
-
-                const uint32_t offset =
-                    face*faceBytes +
-                    (
-                        y*resolution +
-                        x
-                    )*4;
-
-                environment[offset+0] =
-                    static_cast<uint8_t>(
-                        std::clamp(
-                            r*32.0f,
-                            0.0f,
-                            255.0f
-                        )
-                    );
-
-                environment[offset+1] =
-                    static_cast<uint8_t>(
-                        std::clamp(
-                            g*32.0f,
-                            0.0f,
-                            255.0f
-                        )
-                    );
-
-                environment[offset+2] =
-                    static_cast<uint8_t>(
-                        std::clamp(
-                            b*32.0f,
-                            0.0f,
-                            255.0f
-                        )
-                    );
-
-                environment[offset+3] = 255;
-            }
+        if (!UploadImage(
+                irradianceImage_,
+                neutral.data(),
+                neutral.size(),
+                copies.data(),
+                6
+            )) {
+            return false;
         }
     }
 
-    if (!CreateImageRaw(
-            VK_FORMAT_R8G8B8A8_UNORM,
-            VK_IMAGE_USAGE_TRANSFER_DST_BIT |
-                VK_IMAGE_USAGE_SAMPLED_BIT,
-            VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT,
-            {resolution,resolution,1},
-            6,
-            irradianceImage_,
-            irradianceMemory_
-        ) ||
-        !CreateImageViewRaw(
-            irradianceImage_,
-            VK_FORMAT_R8G8B8A8_UNORM,
-            VK_IMAGE_VIEW_TYPE_CUBE,
-            VK_IMAGE_ASPECT_COLOR_BIT,
-            6,
-            irradianceView_
-        ) ||
-        !CreateImageRaw(
-            VK_FORMAT_R8G8B8A8_UNORM,
-            VK_IMAGE_USAGE_TRANSFER_DST_BIT |
-                VK_IMAGE_USAGE_SAMPLED_BIT,
-            VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT,
-            {resolution,resolution,1},
-            6,
+    uint32_t specularMipLevels = 1;
+
+    if (!CreateKtx2Cube(
+            root / "ibl_prefiltered.ktx2",
             prefilteredImage_,
-            prefilteredMemory_
-        ) ||
-        !CreateImageViewRaw(
-            prefilteredImage_,
-            VK_FORMAT_R8G8B8A8_UNORM,
-            VK_IMAGE_VIEW_TYPE_CUBE,
-            VK_IMAGE_ASPECT_COLOR_BIT,
-            6,
-            prefilteredView_
+            prefilteredMemory_,
+            prefilteredView_,
+            specularMipLevels
         )) {
-        return false;
-    }
 
-    std::array<VkBufferImageCopy,6> cubeCopies{};
+        if (!CreateKtx2Cube(
+                root / "environment.ktx2",
+                prefilteredImage_,
+                prefilteredMemory_,
+                prefilteredView_,
+                specularMipLevels
+            )) {
 
-    for (uint32_t face=0; face<6; ++face) {
-        cubeCopies[face].bufferOffset =
-            static_cast<VkDeviceSize>(
-                face*faceBytes
-            );
-        cubeCopies[face].imageSubresource = {
-            VK_IMAGE_ASPECT_COLOR_BIT,
-            0,
-            face,
-            1
-        };
-        cubeCopies[face].imageExtent = {
-            resolution,
-            resolution,
-            1
-        };
-    }
+            if (!CreateHdrEnvironmentCube(
+                    root / "environment.hdr",
+                    prefilteredImage_,
+                    prefilteredMemory_,
+                    prefilteredView_
+                )) {
+                return false;
+            }
 
-    if (!UploadImage(
-            irradianceImage_,
-            environment.data(),
-            environment.size(),
-            cubeCopies.data(),
-            6
-        ) ||
-        !UploadImage(
-            prefilteredImage_,
-            environment.data(),
-            environment.size(),
-            cubeCopies.data(),
-            6
-        )) {
-        return false;
-    }
-
-    constexpr uint32_t lutResolution = 32;
-
-    std::array<uint8_t, lutResolution * lutResolution * 2>
-        brdf{};
-
-    for (uint32_t y=0; y<lutResolution; ++y) {
-        for (uint32_t x=0; x<lutResolution; ++x) {
-            const float NoV =
-                (
-                    static_cast<float>(x) +
-                    0.5f
-                ) /
-                static_cast<float>(lutResolution);
-
-            const float roughness =
-                (
-                    static_cast<float>(y) +
-                    0.5f
-                ) /
-                static_cast<float>(lutResolution);
-
-            // Mobile analytical split-sum approximation:
-            // A retains the view-dependent visibility term;
-            // B approximates the grazing-angle energy compensation.
-            const float A =
-                std::clamp(
-                    1.0f -
-                    roughness *
-                        (
-                            0.45f +
-                            0.55f *
-                                (1.0f-NoV)
-                        ),
-                    0.0f,
-                    1.0f
-                );
-
-            const float B =
-                std::clamp(
-                    roughness *
-                        (
-                            0.08f +
-                            0.30f *
-                                (1.0f-NoV)
-                        ),
-                    0.0f,
-                    1.0f
-                );
-
-            const uint32_t i =
-                (
-                    y*lutResolution +
-                    x
-                )*2;
-
-            brdf[i+0] =
-                static_cast<uint8_t>(
-                    A*255.0f
-                );
-
-            brdf[i+1] =
-                static_cast<uint8_t>(
-                    B*255.0f
-                );
+            specularMipLevels = 1;
         }
     }
 
@@ -3986,7 +4380,7 @@ bool VulkanRenderer::CreateDefaultIBL() {
             VK_IMAGE_USAGE_TRANSFER_DST_BIT |
                 VK_IMAGE_USAGE_SAMPLED_BIT,
             0,
-            {lutResolution,lutResolution,1},
+            {32,32,1},
             1,
             brdfImage_,
             brdfMemory_
@@ -4002,26 +4396,137 @@ bool VulkanRenderer::CreateDefaultIBL() {
         return false;
     }
 
-    VkBufferImageCopy lutCopy{};
-    lutCopy.imageSubresource = {
-        VK_IMAGE_ASPECT_COLOR_BIT,
-        0,
-        0,
-        1
-    };
-    lutCopy.imageExtent = {
-        lutResolution,
-        lutResolution,
-        1
-    };
+    std::array<uint8_t,32u*32u*2u> brdf{};
 
-    return UploadImage(
-        brdfImage_,
-        brdf.data(),
-        brdf.size(),
-        &lutCopy,
-        1
-    );
+    for(uint32_t y=0;y<32;++y) {
+        for(uint32_t x=0;x<32;++x) {
+            const float nv =
+                (
+                    static_cast<float>(x)+0.5f
+                ) / 32.0f;
+
+            const float roughness =
+                (
+                    static_cast<float>(y)+0.5f
+                ) / 32.0f;
+
+            const float a =
+                std::clamp(
+                    1.0f -
+                    roughness *
+                    (
+                        0.45f +
+                        0.55f *
+                        (1.0f-nv)
+                    ),
+                    0.0f,
+                    1.0f
+                );
+
+            const float b =
+                std::clamp(
+                    roughness *
+                    (
+                        0.08f +
+                        0.30f *
+                        (1.0f-nv)
+                    ),
+                    0.0f,
+                    1.0f
+                );
+
+            const size_t i =
+                (
+                    static_cast<size_t>(y)*32u +
+                    x
+                ) * 2u;
+
+            brdf[i] =
+                static_cast<uint8_t>(
+                    a*255.0f
+                );
+
+            brdf[i+1] =
+                static_cast<uint8_t>(
+                    b*255.0f
+                );
+        }
+    }
+
+    VkBufferImageCopy brdfCopy{};
+    brdfCopy.imageSubresource = {
+        VK_IMAGE_ASPECT_COLOR_BIT,0,0,1
+    };
+    brdfCopy.imageExtent = {32,32,1};
+
+    if (!UploadImage(
+            brdfImage_,
+            brdf.data(),
+            brdf.size(),
+            &brdfCopy,
+            1
+        )) {
+        return false;
+    }
+
+    environmentMipLevels_ =
+        std::max(
+            specularMipLevels,
+            environmentMipLevels_
+        );
+
+    // If no separate environment was supplied, use the specular cube as the
+    // atmospheric background resource. Its type is always a cubemap.
+    if (!environmentView_) {
+        if (projectRoot_.empty()) {
+            // No filesystem root: Create a neutral 1x1 cube only as a hard
+            // renderer safety fallback.
+            std::array<uint8_t,4> neutral = {
+                40,55,90,255
+            };
+
+            if (!CreateImageRaw(
+                    VK_FORMAT_R8G8B8A8_UNORM,
+                    VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                        VK_IMAGE_USAGE_SAMPLED_BIT,
+                    VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT,
+                    {1,1,1},
+                    6,
+                    environmentImage_,
+                    environmentMemory_
+                ) ||
+                !CreateImageViewRaw(
+                    environmentImage_,
+                    VK_FORMAT_R8G8B8A8_UNORM,
+                    VK_IMAGE_VIEW_TYPE_CUBE,
+                    VK_IMAGE_ASPECT_COLOR_BIT,
+                    6,
+                    environmentView_
+                )) {
+                return false;
+            }
+
+            std::array<VkBufferImageCopy,6> copies{};
+            for(uint32_t face=0;face<6;++face) {
+                copies[face].imageSubresource = {
+                    VK_IMAGE_ASPECT_COLOR_BIT,0,face,1
+                };
+                copies[face].imageExtent = {1,1,1};
+            }
+
+            if (!UploadImage(
+                    environmentImage_,
+                    neutral.data(),
+                    neutral.size(),
+                    copies.data(),
+                    6
+                ))
+                return false;
+        }
+    }
+
+    (void)mipLevels;
+    return true;
 }
 
 bool VulkanRenderer::UpdateFrameUniforms() noexcept {
