@@ -12,6 +12,7 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <exception>
 #include "engine/core/AetherisLog.h"
 
 namespace aetheris {
@@ -90,27 +91,73 @@ bool VulkanRenderer::Initialize(ANativeWindow* w) {
 }
 
 bool VulkanRenderer::EnsureDeferredResources() {
-    if (!initialized_ || !surface_ || !swapchain_)
+    if (!initialized_ ||
+        !surface_ ||
+        !swapchain_) {
         return false;
+    }
+
     if (deferredResourcesReady_)
         return true;
+
     if (deferredResourcesFailed_)
         return false;
 
-    resourceState_ = ResourceState::AllocatingAssets;
+    resourceState_ =
+        ResourceState::AllocatingAssets;
 
-    if (!EnsureDeferredResourcesInternal()) {
+    try {
+        if (!EnsureDeferredResourcesInternal()) {
+            deferredResourcesReady_ = false;
+            deferredResourcesFailed_ = true;
+            resourceState_ =
+                ResourceState::Failed;
+
+            AETHERIS_VK_LOGE(
+                "Deferred resource bootstrap returned failure"
+            );
+
+            DestroyDeferredResources();
+            return false;
+        }
+    } catch (const std::exception& error) {
         deferredResourcesReady_ = false;
         deferredResourcesFailed_ = true;
-        resourceState_ = ResourceState::Failed;
+        resourceState_ =
+            ResourceState::Failed;
+
+        AETHERIS_VK_LOGE(
+            "Deferred resource bootstrap exception: %s",
+            error.what()
+        );
+
+        DestroyDeferredResources();
+        return false;
+    } catch (...) {
+        deferredResourcesReady_ = false;
+        deferredResourcesFailed_ = true;
+        resourceState_ =
+            ResourceState::Failed;
+
+        AETHERIS_VK_LOGE(
+            "Deferred resource bootstrap threw an unknown exception"
+        );
+
         DestroyDeferredResources();
         return false;
     }
 
     deferredResourcesReady_ = true;
     deferredResourcesFailed_ = false;
-    resourceState_ = ResourceState::Rendering;
+    resourceState_ =
+        ResourceState::Rendering;
+
     UpdateCamera();
+
+    AETHERIS_VK_LOGI(
+        "Deferred Vulkan resource bootstrap complete"
+    );
+
     return true;
 }
 
@@ -1091,7 +1138,8 @@ bool VulkanRenderer::BeginFrame() {
         return false;
     }
 
-    Frame& frame = frames_[frame_];
+    Frame& frame =
+        frames_[frame_];
 
     if (vkWaitForFences(
             device_,
@@ -1119,7 +1167,11 @@ bool VulkanRenderer::BeginFrame() {
             "Acquire returned %s; rebuilding swapchain",
             VkResultName(acquire)
         );
-        RecreateSwapchain(nullptr);
+
+        RecreateSwapchain(
+            nullptr
+        );
+
         return false;
     }
 
@@ -1131,7 +1183,7 @@ bool VulkanRenderer::BeginFrame() {
         return false;
     }
 
-    if(vkResetFences(
+    if (vkResetFences(
             device_,
             1,
             &frame.fence
@@ -1139,7 +1191,7 @@ bool VulkanRenderer::BeginFrame() {
         return false;
     }
 
-    if(vkResetCommandPool(
+    if (vkResetCommandPool(
             device_,
             frame.pool,
             0
@@ -1151,18 +1203,35 @@ bool VulkanRenderer::BeginFrame() {
         VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO
     };
 
-    if(vkBeginCommandBuffer(
+    if (vkBeginCommandBuffer(
             frame.cmd,
             &beginInfo
         ) != VK_SUCCESS) {
         return false;
     }
 
-    UpdateCamera();
-
     begun_ = true;
     mainRenderPassActive_ = false;
     frameRecorded_ = false;
+
+    UpdateCamera();
+
+    // Hard lifecycle barrier: no deferred render graph command may be recorded
+    // until every heavy resource has completed successfully. SurfaceReady and
+    // Failed states instead present the known-good safe clear.
+    if (!deferredResourcesReady_) {
+        if (!RecordSafeClear()) {
+            vkEndCommandBuffer(
+                frame.cmd
+            );
+
+            begun_ = false;
+            frameRecorded_ = false;
+            return false;
+        }
+
+        return true;
+    }
 
     return true;
 }
