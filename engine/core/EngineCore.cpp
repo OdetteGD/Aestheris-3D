@@ -215,7 +215,7 @@ std::unique_ptr<IAetherisRenderer> EngineCore::MakeRenderer(RenderAPI api) {
         return std::make_unique<VulkanRenderer>(projectRoot_);
     }
 
-    return std::make_unique<OpenGLESRenderer>();
+    return std::make_unique<GLES3Renderer>(projectRoot_);
 }
 
 bool EngineCore::CreateRendererLocked(RenderAPI api, ANativeWindow* window) {
