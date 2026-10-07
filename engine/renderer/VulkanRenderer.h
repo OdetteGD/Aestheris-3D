@@ -68,6 +68,7 @@ class VulkanRenderer final : public IAetherisRenderer {
     uint32_t environmentHeight_{};
     uint32_t environmentMipLevels_{1};
 
+    VkRenderPass geometryPass_{};
     VkRenderPass pass_{};
     VkRenderPass postPass_{};
     VkRenderPass ssaoPass_{};
@@ -78,6 +79,8 @@ class VulkanRenderer final : public IAetherisRenderer {
     std::vector<VkImageView> views_{};
     std::vector<VkFramebuffer> framebuffers_{};
     std::vector<VkFramebuffer> postFramebuffers_{};
+    VkFramebuffer geometryFramebuffer_{};
+    VkFramebuffer ssaoFramebuffer_{};
     VkImage bloomA_{};
     VkImageView bloomAView_{};
     VkDeviceMemory bloomAMemory_{};
@@ -87,6 +90,7 @@ class VulkanRenderer final : public IAetherisRenderer {
     std::array<VkFramebuffer, 1> bloomDownFramebuffers_{};
     std::array<VkFramebuffer, 1> bloomUpFramebuffers_{};
     VkExtent2D bloomExtent_{};
+    VkExtent2D ssaoExtent_{};
 
     std::array<Frame, Frames> frames_{};
 
