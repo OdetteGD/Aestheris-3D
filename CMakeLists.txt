@@ -28,6 +28,8 @@ add_library(aetheris3d SHARED
 
 
 
+target_compile_features(aetheris3d PRIVATE cxx_std_20)
+
 target_include_directories(aetheris3d PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
 )
